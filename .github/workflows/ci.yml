@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  content-guard:
+    name: content-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: No firmware or firmware-derived files
+        run: bash tools/ci/content-guard.sh
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Python environment
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --quiet -r requirements.txt
+
+      # The emulator refuses stock Unicorn (emu/unicorn_compat.py), so CI
+      # builds the patched library once per patch set and caches it.
+      - name: Restore the patched Unicorn
+        id: unicorn
+        uses: actions/cache@v6
+        with:
+          path: .ci-cache
+          key: unicorn-${{ runner.os }}-${{ hashFiles('patches/*.patch', 'tools/install-patched-unicorn.sh') }}
+
+      - name: Build the patched Unicorn
+        if: steps.unicorn.outputs.cache-hit != 'true'
+        run: |
+          PYTHON=.venv/bin/python bash tools/install-patched-unicorn.sh
+          mkdir -p .ci-cache
+          cp "$(.venv/bin/python -c 'import os, unicorn; print(os.path.join(os.path.dirname(unicorn.__file__), "lib", "libunicorn.so.2"))')" .ci-cache/
+
+      - name: Install the cached patched Unicorn
+        if: steps.unicorn.outputs.cache-hit == 'true'
+        run: |
+          cp .ci-cache/libunicorn.so.2 "$(.venv/bin/python -c 'import os, unicorn; print(os.path.join(os.path.dirname(unicorn.__file__), "lib"))')/"
+          .venv/bin/python -m emu.unicorn_compat
+
+      - name: Tests (no firmware present, so firmware-backed tests skip)
+        run: bash tools/ci/run-tests.sh .venv/bin/python
