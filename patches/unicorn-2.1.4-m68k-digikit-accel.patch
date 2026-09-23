@@ -1,0 +1,516 @@
+diff --git a/qemu/target/m68k/cpu.c b/qemu/target/m68k/cpu.c
+index 6b636b8..9da0912 100644
+--- a/qemu/target/m68k/cpu.c
++++ b/qemu/target/m68k/cpu.c
+@@ -173,6 +173,13 @@ static void cfv4e_cpu_initfn(CPUState *obj)
+ 
+     m68k_set_feature(env, M68K_FEATURE_CF_ISA_A);
+     m68k_set_feature(env, M68K_FEATURE_CF_ISA_B);
++    /*
++     * digikit: V4e cores such as the MCF5441x implement ISA_C (MCF54418RM
++     * 3.3.2, Table 3-4), which adds BITREV, BYTEREV and FF1 to ISA_A. Without
++     * this FF1 is an illegal instruction here, and the Digitakt mk1 audio
++     * render runs ~40 of them per pass.
++     */
++    m68k_set_feature(env, M68K_FEATURE_CF_ISA_APLUSC);
+     m68k_set_feature(env, M68K_FEATURE_BRAL);
+     m68k_set_feature(env, M68K_FEATURE_CF_FPU);
+     m68k_set_feature(env, M68K_FEATURE_CF_EMAC);
+diff --git a/uc.c b/uc.c
+index eb10c08..9c92c57 100644
+--- a/uc.c
++++ b/uc.c
+@@ -3098,3 +3098,493 @@ void trace_end(uc_tracer *tracer, trace_loc loc, const char *fmt, ...)
+             (double)(end - tracer->starts[loc]) / (double)(1000));
+ }
+ #endif
++
++/*
++ * digikit accelerators (patches/unicorn-2.1.4-m68k-digikit-accel.patch)
++ *
++ * Two things the digikit emulator used to do in Python hooks, done natively
++ * because a Python crossing costs microseconds and these fire tens of
++ * thousands of times per emulated second:
++ *
++ *  - a block budget: end emu_start after N translation blocks (the
++ *    emulator's fast stepper), without a Python call per block;
++ *  - the software-started eDMA channels the Digitakt mk1 audio render
++ *    starts and polls (emu/edma_sw.py has the Python original and the
++ *    reasons for every rule below).
++ */
++
++struct uc_digikit_budget {
++    int64_t left;   /* blocks still allowed in this step */
++    int64_t blocks; /* blocks entered */
++};
++
++static void digikit_budget_cb(uc_engine *uc, uint64_t address, uint32_t size,
++                              void *user_data)
++{
++    struct uc_digikit_budget *b = user_data;
++    /* Checked BEFORE counting: the block that exhausts the step still runs
++     * and is counted, the one after it is neither (as the Python stepper). */
++    if (b->left <= 0) {
++        uc_emu_stop(uc);
++        return;
++    }
++    b->blocks++;
++    b->left--;
++}
++
++UNICORN_EXPORT
++uc_err uc_digikit_add_budget_hook(uc_engine *uc, uc_hook *hh,
++                                  struct uc_digikit_budget *b)
++{
++    return uc_hook_add(uc, hh, UC_HOOK_BLOCK, (void *)digikit_budget_cb, b, 1,
++                       0);
++}
++
++#define DK_CHANNELS 64
++#define DK_CSR 0x1e
++#define DK_START 0x0001
++#define DK_ESG 0x0010
++#define DK_ACTIVE 0x0040
++#define DK_DONE 0x0080
++#define DK_MAX_LINKS 64
++#define DK_MAX_BYTES (1u << 20)
++
++struct uc_digikit_edma {
++    uint32_t tcd_base;
++    uint32_t map_page;          /* the emulator's on-demand mapping unit */
++    uint64_t claimed;           /* channels another model drives: ignored */
++    uint16_t pending[DK_CHANNELS];  /* CSR to show on the next read, 0 none */
++    uint8_t deferred[DK_CHANNELS];  /* Python must run it (page to map) */
++    uint8_t any_deferred;
++    uint8_t pad[7];
++    uint64_t transfers[DK_CHANNELS];
++    uint64_t links[DK_CHANNELS];
++    uint64_t bytes[DK_CHANNELS];
++    uint64_t refused[DK_CHANNELS];
++    uint64_t ndeferred[DK_CHANNELS];
++    uint64_t links_ignored[DK_CHANNELS];
++};
++
++struct dk_tcd {
++    uint32_t saddr, nbytes, slast, daddr, dlast;
++    uint16_t attr, citer, biter, csr;
++    int16_t soff, doff;
++};
++
++static uint32_t dk_be32(const uint8_t *p)
++{
++    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
++           ((uint32_t)p[2] << 8) | p[3];
++}
++
++static uint16_t dk_be16(const uint8_t *p)
++{
++    return (uint16_t)((p[0] << 8) | p[1]);
++}
++
++static void dk_put32(uint8_t *p, uint32_t v)
++{
++    p[0] = v >> 24;
++    p[1] = v >> 16;
++    p[2] = v >> 8;
++    p[3] = v;
++}
++
++static void dk_put16(uint8_t *p, uint16_t v)
++{
++    p[0] = v >> 8;
++    p[1] = v;
++}
++
++static void dk_parse(struct dk_tcd *t, const uint8_t *r)
++{
++    t->saddr = dk_be32(r + 0x00);
++    t->attr = dk_be16(r + 0x04);
++    t->soff = (int16_t)dk_be16(r + 0x06);
++    t->nbytes = dk_be32(r + 0x08);
++    t->slast = dk_be32(r + 0x0c);
++    t->daddr = dk_be32(r + 0x10);
++    t->citer = dk_be16(r + 0x14);
++    t->doff = (int16_t)dk_be16(r + 0x16);
++    t->dlast = dk_be32(r + 0x18);
++    t->biter = dk_be16(r + 0x1c);
++    t->csr = dk_be16(r + 0x1e);
++}
++
++static void dk_pack(const struct dk_tcd *t, uint8_t *r)
++{
++    dk_put32(r + 0x00, t->saddr);
++    dk_put16(r + 0x04, t->attr);
++    dk_put16(r + 0x06, (uint16_t)t->soff);
++    dk_put32(r + 0x08, t->nbytes);
++    dk_put32(r + 0x0c, t->slast);
++    dk_put32(r + 0x10, t->daddr);
++    dk_put16(r + 0x14, t->citer);
++    dk_put16(r + 0x16, (uint16_t)t->doff);
++    dk_put32(r + 0x18, t->dlast);
++    dk_put16(r + 0x1c, t->biter);
++    dk_put16(r + 0x1e, t->csr);
++}
++
++/* CITER/BITER: with ELINK (bit 15) the count is bits 8:0, else 14:0. */
++static uint32_t dk_count(uint16_t raw)
++{
++    return (raw & 0x8000) ? (raw & 0x01ff) : (raw & 0x7fff);
++}
++
++static uint32_t dk_modadd(uint32_t addr, int64_t delta, unsigned mod)
++{
++    if (!mod) {
++        return (uint32_t)(addr + delta);
++    }
++    uint32_t mask = (mod >= 32) ? 0xffffffffu : ((1u << mod) - 1);
++    return (addr & ~mask) | ((uint32_t)(addr + delta) & mask);
++}
++
++static bool dk_is_mapped(uc_engine *uc, uint32_t addr)
++{
++    return uc->memory_mapping(uc, addr) != NULL;
++}
++
++/* Every page the major loop touches is mapped (as emu/edma_sw.py _span),
++ * checked in steps of `step` (the emulator's mapping unit). */
++static bool dk_span_mapped(uc_engine *uc, uint32_t step, uint32_t base,
++                           int32_t off, uint32_t citer, uint32_t nbytes,
++                           unsigned mod)
++{
++    uint64_t span = (uint64_t)(off < 0 ? -off : off) * citer;
++    uint32_t aoff = (uint32_t)(off < 0 ? -off : off);
++    uint64_t lo;
++    span *= (nbytes / (aoff ? aoff : 1)) ? (nbytes / (aoff ? aoff : 1)) : 1;
++    if ((uint64_t)citer * nbytes > span) {
++        span = (uint64_t)citer * nbytes;
++    }
++    if (!span) {
++        span = 1;
++    }
++    lo = base;
++    if (off < 0) {
++        lo = base + (int64_t)off * citer * nbytes;
++    }
++    if (mod) {
++        uint64_t ring = 1ull << mod;
++        uint64_t ringlo = base & ~(ring - 1);
++        if ((base & (ring - 1)) + (span < ring ? span : ring) > ring ||
++            span >= ring) {
++            lo = ringlo;
++            span = ring;
++        } else {
++            lo = base;
++        }
++    }
++    uint64_t a;
++    for (a = lo; a < lo + span; a += step) {
++        if (!dk_is_mapped(uc, (uint32_t)a)) {
++            return false;
++        }
++    }
++    return dk_is_mapped(uc, (uint32_t)(lo + span - 1));
++}
++
++static bool dk_chain_mapped(uc_engine *uc, uint32_t step, uint32_t tcd_addr)
++{
++    uint8_t raw[32];
++    struct dk_tcd t;
++    uint32_t seen[DK_MAX_LINKS];
++    int nseen = 0, i, k;
++
++    if (uc_mem_read(uc, tcd_addr, raw, 32) != UC_ERR_OK) {
++        return false;
++    }
++    for (i = 0; i < DK_MAX_LINKS; i++) {
++        dk_parse(&t, raw);
++        uint32_t citer = dk_count(t.citer);
++        if (!dk_span_mapped(uc, step, t.saddr, t.soff, citer, t.nbytes,
++                            t.attr >> 11) ||
++            !dk_span_mapped(uc, step, t.daddr, t.doff, citer, t.nbytes,
++                            (t.attr >> 3) & 0x1f)) {
++            return false;
++        }
++        if (!(t.csr & DK_ESG)) {
++            return true;
++        }
++        for (k = 0; k < nseen; k++) {
++            if (seen[k] == t.dlast) {
++                return false;
++            }
++        }
++        if ((t.dlast & 0x1f) || !dk_is_mapped(uc, t.dlast)) {
++            return false;
++        }
++        seen[nseen++] = t.dlast;
++        if (uc_mem_read(uc, t.dlast, raw, 32) != UC_ERR_OK) {
++            return false;
++        }
++    }
++    return false;
++}
++
++static bool dk_ring_read(uc_engine *uc, uint32_t addr, uint8_t *buf,
++                         uint32_t n, unsigned mod)
++{
++    while (n) {
++        uint32_t c = n;
++        if (mod) {
++            uint32_t ring = 1u << mod;
++            uint32_t room = ring - (addr & (ring - 1));
++            if (c > room) {
++                c = room;
++            }
++        }
++        if (uc_mem_read(uc, addr, buf, c) != UC_ERR_OK) {
++            return false;
++        }
++        buf += c;
++        n -= c;
++        addr = dk_modadd(addr, c, mod);
++    }
++    return true;
++}
++
++static bool dk_ring_write(uc_engine *uc, uint32_t addr, const uint8_t *buf,
++                          uint32_t n, unsigned mod)
++{
++    while (n) {
++        uint32_t c = n;
++        if (mod) {
++            uint32_t ring = 1u << mod;
++            uint32_t room = ring - (addr & (ring - 1));
++            if (c > room) {
++                c = room;
++            }
++        }
++        if (uc_mem_write(uc, addr, buf, c) != UC_ERR_OK) {
++            return false;
++        }
++        buf += c;
++        n -= c;
++        addr = dk_modadd(addr, c, mod);
++    }
++    return true;
++}
++
++/* One major loop; updates *t and writes it to the channel's TCD. */
++static int64_t dk_run(uc_engine *uc, struct uc_digikit_edma *e, int ch,
++                      struct dk_tcd *t)
++{
++    uint32_t citer = dk_count(t->citer);
++    uint32_t ssize = 1u << ((t->attr >> 8) & 7);
++    uint32_t dsize = 1u << (t->attr & 7);
++    unsigned smod = t->attr >> 11, dmod = (t->attr >> 3) & 0x1f;
++    uint32_t total, source, dest, it, k;
++    uint8_t stackbuf[4096], *buf = stackbuf;
++    uint8_t raw[32];
++
++    if (t->citer & 0x8000) {
++        e->links_ignored[ch]++;
++    }
++    if (!citer || !t->nbytes || (uint64_t)citer * t->nbytes > DK_MAX_BYTES ||
++        (t->nbytes % ssize) || (t->nbytes % dsize)) {
++        return -1;
++    }
++    total = citer * t->nbytes;
++    if (t->soff == (int32_t)ssize && t->doff == (int32_t)dsize) {
++        if (total > sizeof(stackbuf)) {
++            buf = malloc(total);
++            if (!buf) {
++                return -1;
++            }
++        }
++        bool ok = dk_ring_read(uc, t->saddr, buf, total, smod) &&
++                  dk_ring_write(uc, t->daddr, buf, total, dmod);
++        if (buf != stackbuf) {
++            free(buf);
++        }
++        if (!ok) {
++            return -1;
++        }
++        source = dk_modadd(t->saddr, total, smod);
++        dest = dk_modadd(t->daddr, total, dmod);
++    } else {
++        if (t->nbytes > sizeof(stackbuf)) {
++            return -1;
++        }
++        source = t->saddr;
++        dest = t->daddr;
++        for (it = 0; it < citer; it++) {
++            for (k = 0; k < t->nbytes / ssize; k++) {
++                if (uc_mem_read(uc, source, buf + k * ssize, ssize) !=
++                    UC_ERR_OK) {
++                    return -1;
++                }
++                source = dk_modadd(source, t->soff, smod);
++            }
++            for (k = 0; k < t->nbytes / dsize; k++) {
++                if (uc_mem_write(uc, dest, buf + k * dsize, dsize) !=
++                    UC_ERR_OK) {
++                    return -1;
++                }
++                dest = dk_modadd(dest, t->doff, dmod);
++            }
++        }
++    }
++    t->saddr = source + (int32_t)t->slast;
++    t->daddr = (t->csr & DK_ESG) ? dest : dest + (int32_t)t->dlast;
++    t->citer = t->biter;
++    dk_pack(t, raw);
++    uc_mem_write(uc, e->tcd_base + ch * 0x20, raw, 32);
++    return total;
++}
++
++static void dk_transfer(uc_engine *uc, struct uc_digikit_edma *e, int ch)
++{
++    uint32_t tcd_addr = e->tcd_base + ch * 0x20;
++    uint8_t raw[32];
++    struct dk_tcd t;
++    uint32_t seen[DK_MAX_LINKS];
++    int nseen = 0, i, k;
++    int64_t moved = 0, n;
++
++    if (uc_mem_read(uc, tcd_addr, raw, 32) != UC_ERR_OK) {
++        e->refused[ch]++;
++        return;
++    }
++    dk_parse(&t, raw);
++    for (i = 0; i < DK_MAX_LINKS; i++) {
++        n = dk_run(uc, e, ch, &t);
++        if (n < 0) {
++            e->refused[ch]++;
++            return;
++        }
++        moved += n;
++        if (!(t.csr & DK_ESG)) {
++            break;
++        }
++        for (k = 0; k < nseen; k++) {
++            if (seen[k] == t.dlast) {
++                e->refused[ch]++;
++                return;
++            }
++        }
++        if (t.dlast & 0x1f) {
++            e->refused[ch]++;
++            return;
++        }
++        seen[nseen++] = t.dlast;
++        /* Hardware loads the whole 32-byte descriptor over this one. */
++        if (uc_mem_read(uc, t.dlast, raw, 32) != UC_ERR_OK) {
++            e->refused[ch]++;
++            return;
++        }
++        uc_mem_write(uc, tcd_addr, raw, 32);
++        dk_parse(&t, raw);
++        e->links[ch]++;
++    }
++    if (i == DK_MAX_LINKS) {
++        e->refused[ch]++;
++        return;
++    }
++    e->transfers[ch]++;
++    e->bytes[ch] += moved;
++    /* START and ACTIVE clear, DONE sets, the rest from the descriptor the
++     * chain ENDED on. Shown on the guest's next read of the CSR: its own
++     * write of this CSR is still pending and would erase it now. */
++    e->pending[ch] = (t.csr & ~(DK_START | DK_ACTIVE)) | DK_DONE;
++}
++
++static int dk_csr_channel(struct uc_digikit_edma *e, uint64_t address, int size)
++{
++    uint64_t rel = address - e->tcd_base;
++    uint32_t off = rel & 0x1f;
++    int ch = (int)(rel >> 5);
++
++    if (address < e->tcd_base || ch >= DK_CHANNELS ||
++        ((e->claimed >> ch) & 1)) {
++        return -1;
++    }
++    if (off + size <= DK_CSR || off > DK_CSR + 1) {
++        return -1;
++    }
++    return ch;
++}
++
++static void dk_edma_write(uc_engine *uc, uc_mem_type type, uint64_t address,
++                          int size, int64_t value, void *user_data)
++{
++    struct uc_digikit_edma *e = user_data;
++    int ch = dk_csr_channel(e, address, size);
++    uint32_t csr_addr;
++    uint8_t cur[2];
++    int i, off;
++    uint16_t csr;
++
++    if (ch < 0) {
++        return;
++    }
++    csr_addr = e->tcd_base + ch * 0x20 + DK_CSR;
++    if (uc_mem_read(uc, csr_addr, cur, 2) != UC_ERR_OK) {
++        return;
++    }
++    off = (int)(address - csr_addr);
++    for (i = 0; i < size; i++) {
++        int pos = off + i;
++        if (pos >= 0 && pos < 2) {
++            cur[pos] = (uint8_t)(value >> (8 * (size - 1 - i)));
++        }
++    }
++    csr = (uint16_t)((cur[0] << 8) | cur[1]);
++    if (!(csr & DK_START)) {
++        return;
++    }
++    /* Publish the guest's value first; its pending write lands the same. */
++    uc_mem_write(uc, csr_addr, cur, 2);
++    /* Nothing may be MAPPED inside this hook (it resizes the TLB under the
++     * store in progress), so a transfer with an unmapped page is left for
++     * Python, outside emulation. */
++    if (!dk_chain_mapped(uc, e->map_page ? e->map_page : 0x1000,
++                         e->tcd_base + ch * 0x20)) {
++        e->deferred[ch] = 1;
++        e->any_deferred = 1;
++        e->ndeferred[ch]++;
++        return;
++    }
++    dk_transfer(uc, e, ch);
++}
++
++static void dk_edma_read(uc_engine *uc, uc_mem_type type, uint64_t address,
++                         int size, int64_t value, void *user_data)
++{
++    struct uc_digikit_edma *e = user_data;
++    int ch = dk_csr_channel(e, address, size);
++    uint8_t v[2];
++
++    if (ch < 0 || !e->pending[ch]) {
++        return;
++    }
++    dk_put16(v, e->pending[ch]);
++    uc_mem_write(uc, e->tcd_base + ch * 0x20 + DK_CSR, v, 2);
++    e->pending[ch] = 0;
++}
++
++UNICORN_EXPORT
++uc_err uc_digikit_edma_install(uc_engine *uc, uc_hook *hw, uc_hook *hr,
++                               struct uc_digikit_edma *e)
++{
++    uc_err err;
++    uint64_t end = (uint64_t)e->tcd_base + DK_CHANNELS * 0x20 - 1;
++
++    err = uc_hook_add(uc, hw, UC_HOOK_MEM_WRITE, (void *)dk_edma_write, e,
++                      e->tcd_base, end);
++    if (err != UC_ERR_OK) {
++        return err;
++    }
++    return uc_hook_add(uc, hr, UC_HOOK_MEM_READ, (void *)dk_edma_read, e,
++                       e->tcd_base, end);
++}
++
++/* The struct's size, so Python can check its ctypes mirror matches. */
++UNICORN_EXPORT
++size_t uc_digikit_edma_size(void)
++{
++    return sizeof(struct uc_digikit_edma);
++}

@@ -1,0 +1,236 @@
+diff --git a/include/uc_priv.h b/include/uc_priv.h
+index c3132dc..c84f21e 100644
+--- a/include/uc_priv.h
++++ b/include/uc_priv.h
+@@ -416,6 +416,8 @@ struct uc_struct {
+ 
+     sigjmp_buf jmp_bufs[UC_MAX_NESTED_LEVEL]; // To support nested uc_emu_start
+     int nested_level;                         // Current nested_level
++    bool mem_hooks_changed; // digikit: a memory hook was added/removed while
++                            // emulating; flush the TLB at the next top level
+ 
+     struct TranslationBlock *last_tb; // The real last tb we executed.
+ 
+diff --git a/qemu/accel/tcg/cputlb.c b/qemu/accel/tcg/cputlb.c
+index 3d0bebd..27a171e 100644
+--- a/qemu/accel/tcg/cputlb.c
++++ b/qemu/accel/tcg/cputlb.c
+@@ -616,6 +616,17 @@ void tlb_protect_code(struct uc_struct *uc, ram_addr_t ram_addr)
+ {
+     cpu_physical_memory_test_and_clear_dirty(ram_addr, TARGET_PAGE_SIZE,
+                                              DIRTY_MEMORY_CODE);
++    /*
++     * digikit: the dirty bitmap is a stub here, so re-arm the self-modifying
++     * code check directly: every TLB entry that writes this page goes back
++     * to the slow path (notdirty_write), now that it holds code.
++     */
++    if (uc->cpu) {
++        void *host = qemu_map_ram_ptr(uc, NULL, ram_addr & TARGET_PAGE_MASK);
++        if (host) {
++            tlb_reset_dirty(uc->cpu, (uintptr_t)host, TARGET_PAGE_SIZE);
++        }
++    }
+ }
+ 
+ /* update the TLB so that writes in physical page 'phys_addr' are no longer
+@@ -800,6 +811,49 @@ static void tlb_add_large_page(CPUArchState *env, int mmu_idx,
+     env_tlb(env)->d[mmu_idx].large_page_mask = lp_mask;
+ }
+ 
++/*
++ * digikit: which accesses to a guest page carry Unicorn memory hooks.
++ * -> BP_MEM_READ and/or BP_MEM_WRITE. A hook with begin > end covers the
++ * whole address space, as HOOK_BOUND_CHECK treats it.
++ */
++static bool uc_hook_overlaps(struct hook *hook, hwaddr lo, hwaddr hi)
++{
++    if (hook->begin > hook->end) {
++        return true;
++    }
++    return hook->begin <= hi && hook->end >= lo;
++}
++
++static int uc_mem_hook_page_flags(struct uc_struct *uc, hwaddr page)
++{
++    struct hook *hook;
++    HOOK_FOREACH_VAR_DECLARE;
++    hwaddr last = page + TARGET_PAGE_SIZE - 1;
++    int flags = 0;
++
++    HOOK_FOREACH(uc, hook, UC_HOOK_MEM_READ) {
++        if (!hook->to_delete && uc_hook_overlaps(hook, page, last)) {
++            flags |= BP_MEM_READ;
++            break;
++        }
++    }
++    if (!(flags & BP_MEM_READ)) {
++        HOOK_FOREACH(uc, hook, UC_HOOK_MEM_READ_AFTER) {
++            if (!hook->to_delete && uc_hook_overlaps(hook, page, last)) {
++                flags |= BP_MEM_READ;
++                break;
++            }
++        }
++    }
++    HOOK_FOREACH(uc, hook, UC_HOOK_MEM_WRITE) {
++        if (!hook->to_delete && uc_hook_overlaps(hook, page, last)) {
++            flags |= BP_MEM_WRITE;
++            break;
++        }
++    }
++    return flags;
++}
++
+ /* Add a new TLB entry. At most one entry for a given virtual address
+  * is permitted. Only a single TARGET_PAGE_SIZE region is mapped, the
+  * supplied size is only used by tlb_flush_page.
+@@ -894,6 +948,12 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
+ 
+     wp_flags = cpu_watchpoint_address_matches(cpu, vaddr_page,
+                                               TARGET_PAGE_SIZE);
++    /*
++     * digikit: a page some memory hook covers takes the slow path (where
++     * load_helper/store_helper run the hooks); the watchpoint check itself
++     * is a no-op in Unicorn, so the access then completes normally.
++     */
++    wp_flags |= uc_mem_hook_page_flags(cpu->uc, paddr_page);
+ 
+     index = tlb_index(env, mmu_idx, vaddr_page);
+     te = tlb_entry(env, mmu_idx, vaddr_page);
+@@ -1208,9 +1268,22 @@ static void notdirty_write(CPUState *cpu, vaddr mem_vaddr, unsigned size,
+     // - have memory hooks installed
+     // - or doing snapshot
+     // , then never clean the tlb
++    //
++    // digikit: the page is cleaned when it holds no translated code, not
++    // when its TLB entry is non-executable. Unicorn stubs the dirty bitmap
++    // (cpu_physical_memory_is_clean is always true), so every writable page
++    // starts NOTDIRTY; on a CPU whose TLB grants EXEC everywhere (m68k
++    // without an MMU) the old `addr_code == -1` test was never true, and
++    // every guest store stayed on the slow path for good. tlb_protect_code
++    // re-arms NOTDIRTY when code is later translated on the page.
++    //
++    // No "memory hook installed" test either: uc_mem_hook_installed counts
++    // every hook type, so one global UC_HOOK_MEM_INVALID hook (a demand
++    // mapper) made every page "hooked" and kept every store here. A page a
++    // read/write hook covers carries TLB_WATCHPOINT (uc_mem_hook_page_flags),
++    // which tlb_set_dirty leaves alone, so hooked pages stay on the slow path.
+     if (!(!mr || (tlbe->addr_write != -1 && mr->priority < cpu->uc->snapshot_level)) &&
+-            !(tlbe->addr_code != -1) &&
+-            !uc_mem_hook_installed(cpu->uc, tlbe->paddr | (mem_vaddr & ~TARGET_PAGE_MASK))) {
++            !tb_page_has_code(cpu->uc, ram_addr)) {
+         tlb_set_dirty(cpu, mem_vaddr);
+     }
+ }
+diff --git a/qemu/accel/tcg/translate-all.c b/qemu/accel/tcg/translate-all.c
+index 71b6b2b..83184ba 100644
+--- a/qemu/accel/tcg/translate-all.c
++++ b/qemu/accel/tcg/translate-all.c
+@@ -421,6 +421,13 @@ static inline PageDesc *page_find(struct uc_struct *uc, tb_page_addr_t index)
+     return page_find_alloc(uc, index, 0);
+ }
+ 
++/* digikit: see notdirty_write in cputlb.c */
++bool tb_page_has_code(struct uc_struct *uc, tb_page_addr_t addr)
++{
++    PageDesc *p = page_find(uc, addr >> TARGET_PAGE_BITS);
++    return p != NULL && p->first_tb != (uintptr_t)NULL;
++}
++
+ static void page_lock_pair(struct uc_struct *uc, PageDesc **ret_p1, tb_page_addr_t phys1,
+                            PageDesc **ret_p2, tb_page_addr_t phys2, int alloc);
+ 
+diff --git a/qemu/accel/tcg/translate-all.h b/qemu/accel/tcg/translate-all.h
+index 30ce55d..32c9d27 100644
+--- a/qemu/accel/tcg/translate-all.h
++++ b/qemu/accel/tcg/translate-all.h
+@@ -32,5 +32,7 @@ void tb_invalidate_phys_page_fast(struct uc_struct *uc, struct page_collection *
+ void tb_invalidate_phys_page_range(struct uc_struct *uc, tb_page_addr_t start, tb_page_addr_t end);
+ void tb_invalidate_phys_range(struct uc_struct *uc, ram_addr_t start, ram_addr_t end);
+ void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr);
++/* digikit: does the page holding ram address `addr` have translated code? */
++bool tb_page_has_code(struct uc_struct *uc, tb_page_addr_t addr);
+ 
+ #endif /* TRANSLATE_ALL_H */
+diff --git a/qemu/include/tcg/tcg.h b/qemu/include/tcg/tcg.h
+index bbeb4b9..980eb9e 100644
+--- a/qemu/include/tcg/tcg.h
++++ b/qemu/include/tcg/tcg.h
+@@ -1590,9 +1590,13 @@ void uc_add_inline_hook(uc_engine *uc, struct hook *hk, void** args, int args_le
+ 
+ static inline bool tcg_uc_has_hookmem(TCGContext *s)
+ {
+-    return HOOK_EXISTS(s->uc, UC_HOOK_MEM_READ) ||
+-        HOOK_EXISTS(s->uc, UC_HOOK_MEM_READ_AFTER) ||
+-        HOOK_EXISTS(s->uc, UC_HOOK_MEM_WRITE);
++    /*
++     * digikit: never force every guest access down the slow path because
++     * SOME memory hook exists. tlb_set_page_with_attrs marks only the pages
++     * a hook covers (TLB_WATCHPOINT), so they alone take the slow path where
++     * the hooks run; every other page keeps the inline TLB fast path.
++     */
++    return false;
+ }
+ 
+ #endif /* TCG_H */
+diff --git a/uc.c b/uc.c
+index 75b89a0..eb10c08 100644
+--- a/uc.c
++++ b/uc.c
+@@ -1089,6 +1089,12 @@ uc_err uc_emu_start(uc_engine *uc, uint64_t begin, uint64_t until,
+     // Avoid nested uc_emu_start saves wrong jit states.
+     if (uc->nested_level == 0) {
+         UC_INIT(uc);
++        // digikit: a memory hook changed during the last run; refill the TLB
++        // so hooked pages are (un)marked for the slow path.
++        if (uc->mem_hooks_changed) {
++            uc->mem_hooks_changed = false;
++            uc->tcg_flush_tlb(uc);
++        }
+     }
+ 
+     // Advance the nested levels. We must decrease the level count by one when
+@@ -1904,6 +1910,19 @@ uc_err uc_mem_unmap(struct uc_struct *uc, uint64_t address, uint64_t size)
+     return UC_ERR_OK;
+ }
+ 
++// digikit: memory hooks are routed per page through the TLB, so a change
++// must refill it. Flushing while emulating (from inside a hook) would
++// reallocate the TLB under the access in progress, so that case is deferred
++// to the next top-level uc_emu_start.
++static void uc_mem_hooks_changed(uc_engine *uc)
++{
++    if (uc->nested_level == 0 && uc->tcg_flush_tlb) {
++        uc->tcg_flush_tlb(uc);
++    } else {
++        uc->mem_hooks_changed = true;
++    }
++}
++
+ UNICORN_EXPORT
+ uc_err uc_hook_add(uc_engine *uc, uc_hook *hh, int type, void *callback,
+                    void *user_data, uint64_t begin, uint64_t end, ...)
+@@ -2022,6 +2041,13 @@ uc_err uc_hook_add(uc_engine *uc, uc_hook *hh, int type, void *callback,
+         i++;
+     }
+ 
++    // digikit: memory hooks act through the TLB (see
++    // uc_mem_hook_page_flags in cputlb.c), so the TLB must be refilled.
++    if (hook->refs != 0 && (type & (UC_HOOK_MEM_READ | UC_HOOK_MEM_READ_AFTER |
++                                    UC_HOOK_MEM_WRITE))) {
++        uc_mem_hooks_changed(uc);
++    }
++
+     // we didn't use the hook
+     // TODO: return an error?
+     if (hook->refs == 0) {
+@@ -2053,6 +2079,10 @@ uc_err uc_hook_del(uc_engine *uc, uc_hook hh)
+             hook->to_delete = true;
+             uc->hooks_count[i]--;
+             hook_append(&uc->hooks_to_del, hook);
++            if (i == UC_HOOK_MEM_READ_IDX || i == UC_HOOK_MEM_READ_AFTER_IDX ||
++                i == UC_HOOK_MEM_WRITE_IDX) {
++                uc_mem_hooks_changed(uc);
++            }
+         }
+     }
+ 

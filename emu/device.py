@@ -1,0 +1,260 @@
+"""Which product is this firmware, and what is on its front panel?
+
+`emu/config.py` answers "which file", and `emu/symbols.py` answers "which
+addresses". Neither answers "which DEVICE" -- config settles a tie between
+firmware files by hardcoded FILENAME, which is how running one product under
+another's name happens silently.
+
+A device file under `devices/` is the missing piece. It carries only what the
+image cannot tell us:
+
+  * identity, keyed by the firmware's SHA-256. The filename is a hint for
+    error messages; people rename firmware files, hashes do not change.
+  * the wire mapping. The link carries (channel, bit) and the firmware reports
+    a control code; channels 0..5 are linear and channel 6 is not, differently
+    on each product.
+  * display grouping, which is editorial -- it says how to arrange controls,
+    not what they are.
+
+Deliberately NOT here: control names and guest addresses. Names come from the
+firmware's own factory-test tables via `emu/symbols.py`, and addresses are
+resolved by signature. Freezing either into a data file would mean a new file
+per firmware release and would lose exactly the property that makes both
+products work from one code path.
+"""
+import hashlib
+import os
+import tomllib
+
+DEVICES_DEFAULT = 'devices'
+
+BUTTON = 'button'
+ENCODER = 'encoder'
+
+
+class DeviceError(SystemExit):
+    """No device matched, or a device file is malformed. The message says how."""
+
+
+class Firmware:
+    """One known firmware release of a device."""
+
+    def __init__(self, version, sha256, filename=None):
+        self.version = version
+        self.sha256 = sha256.lower()
+        self.filename = filename
+
+    def __repr__(self):
+        return '<Firmware %s %s>' % (self.version, self.sha256[:12])
+
+
+class Group:
+    """A set of control codes and how to arrange them. Display only."""
+
+    def __init__(self, name, kind, codes, layout='row', columns=None):
+        self.name = name
+        self.kind = kind
+        self.codes = tuple(codes)
+        self.layout = layout
+        self.columns = columns
+
+    def __repr__(self):
+        return '<Group %s %s %d>' % (self.name, self.kind, len(self.codes))
+
+
+class Device:
+    """A product: its identity, its wire mapping and its panel arrangement."""
+
+    def __init__(self, name, short, firmwares, linear_channels, encoders,
+                 exceptions, groups, path=None, intro_channels=(),
+                 intro_unblocks_frame_sem=True, post_intro_ips=0,
+                 labels=None, leds=None, page_leds=(), audio=None):
+        self.name = name
+        self.short = short
+        self.firmwares = tuple(firmwares)
+        self.linear_channels = linear_channels
+        self.encoders = encoders
+        self.exceptions = dict(exceptions)
+        self.groups = tuple(groups)
+        self.path = path
+        # How this product's boot intro has to be driven. The two known
+        # behaviours are opposites, so there is no default that suits both.
+        # These defaults are the Digitakt II ones, so a device file that says
+        # nothing keeps exactly the behaviour it had before this existed.
+        # See the [intro] table in devices/digitakt.toml.
+        self.intro_channels = tuple(intro_channels)
+        self.intro_unblocks_frame_sem = bool(intro_unblocks_frame_sem)
+        # Timer rate applied once the intro hands over, in instructions per
+        # emulated second. 0 means "keep whatever the caller defaults to",
+        # which is what every device did before this existed. It decides how
+        # much EMULATED time passes per wall second: emulated_rate =
+        # host_instructions_per_second / post_intro_ips, so a smaller number
+        # is a more responsive window.
+        self.post_intro_ips = int(post_intro_ips or 0)
+        # Measured control names, code -> name. These override the firmware's
+        # own table, which on this product labels the panel-test screen rather
+        # than the runtime key map. Empty for a device that has not been
+        # measured, which then keeps the table's names.
+        self.labels = dict(labels or {})
+        # Key LEDs, LED id -> the button code of the key it lights, and the
+        # LED ids with no key of their own (pattern-page LEDs), in order.
+        # Empty for a device whose LED stream has not been decoded.
+        self.leds = dict(leds or {})
+        self.page_leds = tuple(page_leds)
+        # How to run and record the audio output ([audio] in the device
+        # file): ssi_profile, request_hz, rate, sample_bits. None for a
+        # device whose audio path has not been modelled.
+        self.audio = dict(audio) if audio else None
+
+    def __repr__(self):
+        return '<Device %s>' % self.name
+
+    def wire_for(self, code):
+        """-> (channel, bit) for a BUTTON code, or None if this product has none.
+
+        A code with no wire position is not an error: Digitakt simply has
+        fewer channel-6 controls than Digitone.
+        """
+        if code in self.exceptions:
+            return self.exceptions[code]
+        if 1 <= code <= self.linear_channels * 8:
+            return ((code - 1) // 8, (code - 1) % 8)
+        return None
+
+    def code_at(self, channel, bit):
+        """-> the BUTTON code reported by a (channel, bit), or None."""
+        for code, pos in self.exceptions.items():
+            if pos == (channel, bit):
+                return code
+        if 0 <= channel < self.linear_channels and 0 <= bit < 8:
+            return channel * 8 + bit + 1
+        return None
+
+    def encoder_channel(self, code):
+        """-> the wire channel for an ENCODER rotation code, or None.
+
+        Rotation codes are a separate space from the encoder push buttons:
+        rotation `code` is wire channel `code - 1`.
+        """
+        if 1 <= code <= self.encoders:
+            return code - 1
+        return None
+
+    def button_codes(self):
+        """-> every button code this product's groups declare, in order."""
+        return tuple(c for g in self.groups if g.kind == BUTTON
+                     for c in g.codes)
+
+    def firmware_for_sha256(self, sha256):
+        for fw in self.firmwares:
+            if fw.sha256 == sha256.lower():
+                return fw
+        return None
+
+
+def _require(table, key, where):
+    if key not in table:
+        raise DeviceError('%s: missing [%s]' % (where, key))
+    return table[key]
+
+
+def load(path):
+    """-> Device parsed from one TOML device file."""
+    with open(path, 'rb') as fh:
+        raw = tomllib.load(fh)
+    dev = _require(raw, 'device', path)
+    panel = _require(raw, 'panel', path)
+    firmwares = [Firmware(f.get('version'), _require(f, 'sha256', path),
+                          f.get('filename'))
+                 for f in raw.get('firmware', ())]
+    # TOML bare keys are strings even when they look like integers, so the
+    # exception table's control codes arrive as '49' rather than 49.
+    exceptions = {}
+    for code, pos in panel.get('exceptions', {}).items():
+        if len(pos) != 2:
+            raise DeviceError('%s: exception %s must be [channel, bit]'
+                              % (path, code))
+        exceptions[int(code)] = (int(pos[0]), int(pos[1]))
+    groups = [Group(g.get('name'), g.get('kind', BUTTON), g.get('codes', ()),
+                    g.get('layout', 'row'), g.get('columns'))
+              for g in panel.get('group', ())]
+    intro = raw.get('intro', {})
+    return Device(
+        name=_require(dev, 'name', path),
+        short=dev.get('short'),
+        firmwares=firmwares,
+        linear_channels=int(panel.get('linear_channels', 6)),
+        encoders=int(panel.get('encoders', 9)),
+        exceptions=exceptions,
+        groups=groups,
+        path=path,
+        intro_channels=[int(c) for c in intro.get('channels', ())],
+        intro_unblocks_frame_sem=bool(intro.get('unblocks_frame_sem', True)),
+        post_intro_ips=int(intro.get('post_intro_ips', 0) or 0),
+        labels={int(k): str(v) for k, v in panel.get('labels', {}).items()},
+        leds={int(k): int(v) for k, v in panel.get('leds', {}).items()},
+        page_leds=[int(v) for v in panel.get('page_leds', ())],
+        audio=_audio(raw.get('audio'), path),
+    )
+
+
+def _audio(table, where):
+    """-> the [audio] table checked and typed, or None if there is none."""
+    if not table:
+        return None
+    out = {'ssi_profile': str(_require(table, 'ssi_profile', where)),
+           'request_hz': int(_require(table, 'request_hz', where)),
+           'rate': int(table.get('rate', 48000)),
+           'sample_bits': int(table.get('sample_bits', 24)),
+           'ips': int(table.get('ips', 0) or 0),
+           'fallback_request_hz': int(table.get('fallback_request_hz', 0)
+                                      or 0)}
+    if out['request_hz'] <= 0 or out['rate'] <= 0 or out['ips'] < 0 \
+            or out['fallback_request_hz'] < 0:
+        raise DeviceError('%s: [audio] rates must be positive' % where)
+    if not 16 <= out['sample_bits'] <= 32:
+        raise DeviceError('%s: [audio] sample_bits must be 16..32' % where)
+    return out
+
+
+def devices_dir():
+    return os.environ.get('DT2_DEVICES', DEVICES_DEFAULT)
+
+
+def load_all(dirpath=None):
+    """-> every Device under `dirpath`, sorted by name."""
+    dirpath = dirpath or devices_dir()
+    if not os.path.isdir(dirpath):
+        raise DeviceError('No devices directory at %s' % dirpath)
+    out = [load(os.path.join(dirpath, n))
+           for n in sorted(os.listdir(dirpath)) if n.endswith('.toml')]
+    return sorted(out, key=lambda d: d.name)
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def identify(firmware_path, dirpath=None):
+    """-> (Device, Firmware) for a firmware file, by content hash.
+
+    Refuses rather than guesses. An unknown hash is a real answer: it means
+    this is a firmware release nobody has mapped, not that it is one of the
+    two we know.
+    """
+    sha = sha256_of(firmware_path)
+    for device in load_all(dirpath):
+        fw = device.firmware_for_sha256(sha)
+        if fw is not None:
+            return device, fw
+    raise DeviceError(
+        'No device file matches %s\n\n'
+        '  sha256 %s\n\n'
+        'Known releases are listed in %s/. This is either a firmware version\n'
+        'nobody has mapped yet or a different product; either way, guessing\n'
+        'which one would run it under the wrong panel.'
+        % (firmware_path, sha, dirpath or devices_dir()))

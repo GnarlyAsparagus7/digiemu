@@ -1,0 +1,248 @@
+{
+  "document": "digitakt-mk1.container",
+  "schema_version": 1,
+  "firmware_file": "Digitakt_OS1.53.syx",
+  "notes": "Every field is read or computed from the firmware file by tools/mk1doc_container.py. No value is carried over from the Digitakt II documentation.",
+  "sysex": {
+    "file_bytes": 1422880,
+    "file_sha256": "9bdd44bb6102fb25c143cfab97bc92b7a89c463f795d3112dce89771e29bcc92",
+    "sysex_messages": 11118,
+    "message_body_sizes": {
+      "14": 2,
+      "126": 11116
+    },
+    "manufacturer_id": "00203c",
+    "manufacturer": "Elektron (00 20 3C)",
+    "device_bytes_seen": {
+      "0xa": 11118
+    },
+    "command_bytes_seen": {
+      "0x7f": 2,
+      "0x7e": 11116
+    },
+    "encoding": "8-in-7: each group of 7 data bytes preceded by a byte holding their high bits, MSB first",
+    "provenance": "read from the .syx file by this tool"
+  },
+  "decoded_stream": {
+    "bytes": 1122716,
+    "sha256": "7e5a0392e7d9af96dbf98a98e158349953fe83900d44478151092dcce0e61a86",
+    "ele3_offset": 8,
+    "preamble_hex": "001121701aefb76a",
+    "preamble_note": "8 bytes; bytes 4..8 are the 32-bit content checksum per dt2/container.py",
+    "declared_checksum": "0x1aefb76a"
+  },
+  "container": {
+    "magic": "ELE3",
+    "bytes": 1122708,
+    "sha256": "b239734601238c8375d09fbafb303fdb5425cee7945b027cace6a6284d6cfdf8",
+    "section_count_offset": "0x1c",
+    "section_table_offset": "0x20",
+    "section_entry_size": 16,
+    "section_entry_fields": [
+      "id",
+      "offset",
+      "compressed_length",
+      "dest"
+    ],
+    "dest_note": "a load address for code sections; for the bootstrap (section 2) it is a VERSION word, not an address (dt2/container.py)",
+    "section_count": 5,
+    "header_hex": "454c45330000002c303130342020202020202020312e35330000000000000005",
+    "header_fields": [
+      {
+        "offset": "0x00",
+        "size": 4,
+        "raw": "454c4533",
+        "interpretation": "magic 'ELE3'",
+        "confidence": "measured"
+      },
+      {
+        "offset": "0x04",
+        "size": 4,
+        "raw": "0000002c",
+        "interpretation": "u32 = 44. NO CONSUMER FOUND: MAIN OS loads the 32-byte header to 0x421ED5A8 and there is not one absolute reference to 0x421ED5AC anywhere in the image",
+        "confidence": "value measured; unused by any absolute reference"
+      },
+      {
+        "offset": "0x08",
+        "size": 12,
+        "raw": "303130342020202020202020",
+        "interpretation": "ASCII '0104        ' (space padded) -- the BUILD string. The updater compares it as a 32-bit value against \"006/\" to enforce a build-number floor; see docs/FINDINGS.md \"MAIN OS has a second gate, and it reads the BUILD string\". So this is build 104, not a product code.",
+        "confidence": "measured bytes; purpose from docs/FINDINGS.md"
+      },
+      {
+        "offset": "0x14",
+        "size": 4,
+        "raw": "312e3533",
+        "interpretation": "ASCII '1.53' -- the OS version string. Read register-relative, not absolutely, which is why a search for an absolute reference finds none (docs/FINDINGS.md).",
+        "confidence": "measured bytes; matches the filename version"
+      },
+      {
+        "offset": "0x18",
+        "size": 4,
+        "raw": "00000000",
+        "interpretation": "u32 = 0. NO CONSUMER FOUND: no absolute reference to 0x421ED5C0 anywhere in the image",
+        "confidence": "value measured; unused by any absolute reference"
+      },
+      {
+        "offset": "0x1c",
+        "size": 4,
+        "raw": "00000005",
+        "interpretation": "u32 = 5 -- the section count, which dt2/container.py reads from this offset",
+        "confidence": "measured, corroborated by dt2/container.py"
+      }
+    ]
+  },
+  "sections": [
+    {
+      "index": 0,
+      "id": 5,
+      "container_offset": "0x00000080",
+      "compressed_length": 15,
+      "dest_raw": "0x00000000",
+      "stream_header": {
+        "declared_stream_length": 842412089,
+        "declared_byte_sum": "0x30382031",
+        "header_matches_slice": false
+      },
+      "storage": "raw",
+      "decompressed_length": 15,
+      "decompressed_sha256": "94f2040dd46e13171549525e9eb916023257d1e7a8ed589759e86be6b462b92a",
+      "first_16_bytes": "3236303930382031343a33383a3434",
+      "architecture": "raw data",
+      "architecture_evidence": {
+        "m68k_opcode_counts": {
+          "rts": 0,
+          "link a6": 0,
+          "lea -n(a7),a7": 0,
+          "movem.l ->(a7)": 0,
+          "unlk a6": 0
+        },
+        "m68k_total": 0,
+        "thumb_push_pop_halfwords": 0,
+        "shannon_entropy_bits_per_byte": 3.19
+      },
+      "compression_ratio": 1.0,
+      "raw_as_text": "260908 14:38:44"
+    },
+    {
+      "index": 1,
+      "id": 2,
+      "container_offset": "0x00000090",
+      "compressed_length": 15128,
+      "dest_raw": "0x03000900",
+      "stream_header": {
+        "declared_stream_length": 15117,
+        "declared_byte_sum": "0x00193043",
+        "header_matches_slice": false
+      },
+      "storage": "packed",
+      "decompressed_length": 26846,
+      "decompressed_sha256": "d7146aea21e8e955720be0ccff0f0b3a9787c879618feca94acb1f58486cfc4d",
+      "architecture": "ColdFire / m68k (big-endian)",
+      "architecture_evidence": {
+        "m68k_opcode_counts": {
+          "rts": 158,
+          "link a6": 8,
+          "lea -n(a7),a7": 172,
+          "movem.l ->(a7)": 0,
+          "unlk a6": 8
+        },
+        "m68k_total": 346,
+        "thumb_push_pop_halfwords": 9,
+        "shannon_entropy_bits_per_byte": 6.39
+      },
+      "compression_ratio": 1.775,
+      "first_16_bytes": "000068d68001000080000eaa03000900"
+    },
+    {
+      "index": 2,
+      "id": 3,
+      "container_offset": "0x00003bb0",
+      "compressed_length": 971176,
+      "dest_raw": "0x40000400",
+      "stream_header": {
+        "declared_stream_length": 971165,
+        "declared_byte_sum": "0x0630ee4c",
+        "header_matches_slice": false
+      },
+      "storage": "packed",
+      "decompressed_length": 2475584,
+      "decompressed_sha256": "4b47a9507758ca5669ca02ab2c0374d2c04c98aece445408295cc1dcb265c5df",
+      "architecture": "ColdFire / m68k (big-endian)",
+      "architecture_evidence": {
+        "m68k_opcode_counts": {
+          "rts": 10020,
+          "link a6": 1787,
+          "lea -n(a7),a7": 16352,
+          "movem.l ->(a7)": 3,
+          "unlk a6": 2123
+        },
+        "m68k_total": 30285,
+        "thumb_push_pop_halfwords": 8,
+        "shannon_entropy_bits_per_byte": 6.596
+      },
+      "compression_ratio": 2.549,
+      "first_16_bytes": "400004e8000000000000000000000000"
+    },
+    {
+      "index": 3,
+      "id": 4,
+      "container_offset": "0x000f0d60",
+      "compressed_length": 32776,
+      "dest_raw": "0x80000400",
+      "stream_header": {
+        "declared_stream_length": 2147484818,
+        "declared_byte_sum": "0x00000000",
+        "header_matches_slice": false
+      },
+      "storage": "raw",
+      "decompressed_length": 32768,
+      "decompressed_sha256": "b50f6b35f851ecb30846e24a1b9c4a62bf10c96fa81bb1f0b41b59e60472d9cb",
+      "first_16_bytes": "000000000000000046fc27002f48fffc",
+      "architecture": "ColdFire / m68k (big-endian)",
+      "architecture_evidence": {
+        "m68k_opcode_counts": {
+          "rts": 212,
+          "link a6": 27,
+          "lea -n(a7),a7": 147,
+          "movem.l ->(a7)": 0,
+          "unlk a6": 49
+        },
+        "m68k_total": 435,
+        "thumb_push_pop_halfwords": 1,
+        "shannon_entropy_bits_per_byte": 6.048
+      },
+      "compression_ratio": 1.0
+    },
+    {
+      "index": 4,
+      "id": 8,
+      "container_offset": "0x000f8d70",
+      "compressed_length": 103416,
+      "dest_raw": "0x00000000",
+      "stream_header": {
+        "declared_stream_length": 103407,
+        "declared_byte_sum": "0x00b543ef",
+        "header_matches_slice": false
+      },
+      "storage": "packed",
+      "decompressed_length": 159948,
+      "decompressed_sha256": "6943b2f27773f40f1e7857ea6fa7a121269e930bd403098e6b6c00002327dc20",
+      "architecture": "ARM Thumb-2 (little-endian)",
+      "architecture_evidence": {
+        "m68k_opcode_counts": {
+          "rts": 0,
+          "link a6": 0,
+          "lea -n(a7),a7": 1,
+          "movem.l ->(a7)": 1,
+          "unlk a6": 0
+        },
+        "m68k_total": 2,
+        "thumb_push_pop_halfwords": 1160,
+        "shannon_entropy_bits_per_byte": 7.017
+      },
+      "compression_ratio": 1.547,
+      "first_16_bytes": "ffffffffffffffffffffffffffffffff"
+    }
+  ]
+}

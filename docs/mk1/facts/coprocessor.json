@@ -1,0 +1,183 @@
+{
+  "document": "digitakt-mk1.coprocessor",
+  "schema_version": 1,
+  "section_id": 8,
+  "container_offset": "0x000F8D70",
+  "packed_bytes": 103416,
+  "unpacked_bytes": 159948,
+  "sha256": "6943b2f27773f40f1e7857ea6fa7a121269e930bd403098e6b6c00002327dc20",
+  "dest_field": "0x00000000",
+  "dest_note": "the section table gives 0x00000000, which is not a load address. WHERE THIS IS LOADED IS UNKNOWN from the container alone.",
+  "entropy_bits_per_byte": 7.017,
+  "leading_padding": {
+    "byte": "0xFF",
+    "length": 4096,
+    "note": "erased-flash or zero padding before any content. A vector table test run at offset 0 on this would be meaningless."
+  },
+  "vector_table_test": {
+    "first_word_le": "0xFFFFFFFF",
+    "second_word_le": "0xFFFFFFFF",
+    "first_word_be": "0xFFFFFFFF",
+    "second_word_be": "0xFFFFFFFF",
+    "reset_vector_thumb_bit_set": true,
+    "first_word_looks_like_sp": false,
+    "vectors_1_to_15_with_thumb_bit": 15,
+    "vectors_1_to_15_inside_image": 0,
+    "all_words_are_padding": true,
+    "verdict": "INCONCLUSIVE -- offset 0 is padding (0xFFFFFFFF), so there is no vector table here to test"
+  },
+  "vector_table_test_after_padding": {
+    "offset": "0x001000",
+    "first_word_le": "0x412000D1",
+    "second_word_le": "0x60042000",
+    "reset_vector_thumb_bit_set": false,
+    "vectors_1_to_15_inside_image": 0,
+    "verdict": "NOT a Cortex-M vector table here either"
+  },
+  "thumb_census": {
+    "push_lr_halfwords": 465,
+    "pop_pc_halfwords": 695,
+    "bx_lr_occurrences": 331,
+    "note": "push {..,lr} is 0xB5xx and pop {..,pc} is 0xBDxx in little-endian Thumb; bx lr is 4770. Counts this high are only produced by real Thumb code."
+  },
+  "decode_coverage": {
+    "method": "capstone Thumb disassembly from 12 offsets, measuring how many bytes decode in an unbroken run before an undefined encoding, window 4096 bytes",
+    "probes": [
+      {
+        "offset": "0x001000",
+        "bytes_decoded_before_break": 44,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x0042BA",
+        "bytes_decoded_before_break": 4094,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x007576",
+        "bytes_decoded_before_break": 4096,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x00A830",
+        "bytes_decoded_before_break": 2476,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x00DAEC",
+        "bytes_decoded_before_break": 692,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x010DA6",
+        "bytes_decoded_before_break": 76,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x014062",
+        "bytes_decoded_before_break": 752,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x01731C",
+        "bytes_decoded_before_break": 4096,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x01A5D8",
+        "bytes_decoded_before_break": 1124,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x01D892",
+        "bytes_decoded_before_break": 658,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x020B4E",
+        "bytes_decoded_before_break": 1366,
+        "of_window": 4096
+      },
+      {
+        "offset": "0x023E08",
+        "bytes_decoded_before_break": 1696,
+        "of_window": 4096
+      }
+    ],
+    "average_unbroken_run_bytes": 1764.2,
+    "full_window_probes": 3,
+    "max_unbroken_run_bytes": 4096,
+    "interpretation": "EXECUTABLE THUMB CODE interleaved with data. The averages understate it: a probe that decodes a whole 4096-byte window without hitting an undefined encoding is something compressed or random data essentially never does, and several probes do. The short runs are probes that landed in a literal pool or mid-instruction, which is normal for ARM firmware and also explains the ~7.1 bits/byte entropy."
+  },
+  "printable_strings_found": 283,
+  "entropy_profile": [
+    {
+      "offset": "0x000000",
+      "entropy": 1.88
+    },
+    {
+      "offset": "0x00270C",
+      "entropy": 7.04
+    },
+    {
+      "offset": "0x004E18",
+      "entropy": 7.16
+    },
+    {
+      "offset": "0x007524",
+      "entropy": 7.05
+    },
+    {
+      "offset": "0x009C30",
+      "entropy": 7.12
+    },
+    {
+      "offset": "0x00C33C",
+      "entropy": 7.13
+    },
+    {
+      "offset": "0x00EA48",
+      "entropy": 6.95
+    },
+    {
+      "offset": "0x011154",
+      "entropy": 7.09
+    },
+    {
+      "offset": "0x013860",
+      "entropy": 7.15
+    },
+    {
+      "offset": "0x015F6C",
+      "entropy": 7.05
+    },
+    {
+      "offset": "0x018678",
+      "entropy": 6.66
+    },
+    {
+      "offset": "0x01AD84",
+      "entropy": 6.53
+    },
+    {
+      "offset": "0x01D490",
+      "entropy": 6.13
+    },
+    {
+      "offset": "0x01FB9C",
+      "entropy": 7.21
+    },
+    {
+      "offset": "0x0222A8",
+      "entropy": 7.12
+    },
+    {
+      "offset": "0x0249B4",
+      "entropy": 6.14
+    },
+    {
+      "offset": "0x0270C0",
+      "entropy": 2.52
+    }
+  ]
+}

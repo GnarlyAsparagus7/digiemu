@@ -1,0 +1,595 @@
+{
+  "document": "digitakt-mk1.memory-map",
+  "schema_version": 1,
+  "note": "The nominal map is what the SoC defines; the mapped regions are what this firmware actually uses. They are different things and are reported separately.",
+  "nominal_soc_map": [
+    {
+      "name": "low_boot_dependent",
+      "start": "0x00000000",
+      "end": "0x3FFFFFFF",
+      "description": "FlexBus/NAND/internal SRAM mapping depends on boot source",
+      "source": "mcf5441x_rm",
+      "source_ref": "chapter 1 table 1-2; pages/p0056.txt"
+    },
+    {
+      "name": "sdram",
+      "start": "0x40000000",
+      "end": "0x7FFFFFFF",
+      "description": "SDRAM controller space",
+      "source": "mcf5441x_rm",
+      "source_ref": "chapter 1 table 1-2; pages/p0056.txt"
+    },
+    {
+      "name": "internal_sram_backdoor",
+      "start": "0x80000000",
+      "end": "0x8BFFFFFF",
+      "description": "64 KiB internal SRAM alias for non-core masters; wraps through this range",
+      "source": "mcf5441x_rm",
+      "source_ref": "chapter 1 table 1-2 note 3; pages/p0056.txt"
+    },
+    {
+      "name": "rapid_gpio",
+      "start": "0x8C000000",
+      "end": "0x8FFFFFFF",
+      "description": "Rapid GPIO space",
+      "source": "mcf5441x_rm",
+      "source_ref": "chapter 1 table 1-2; pages/p0056.txt"
+    },
+    {
+      "name": "reserved_9000",
+      "start": "0x90000000",
+      "end": "0xBFFFFFFF",
+      "description": "Reserved; must not be accessed",
+      "source": "mcf5441x_rm",
+      "source_ref": "chapter 1 table 1-2; pages/p0056.txt"
+    },
+    {
+      "name": "flexbus_high",
+      "start": "0xC0000000",
+      "end": "0xDFFFFFFF",
+      "description": "Non-cacheable FlexBus/device space",
+      "source": "mcf5441x_rm",
+      "source_ref": "chapter 1 section 1.8; pages/p0056.txt"
+    },
+    {
+      "name": "peripheral_bus_1",
+      "start": "0xE0000000",
+      "end": "0xEFFFFFFF",
+      "description": "Peripheral bus controller 1 space",
+      "source": "mcf5441x_rm",
+      "source_ref": "chapter 1 table 1-2; pages/p0056.txt"
+    },
+    {
+      "name": "peripheral_bus_0",
+      "start": "0xF0000000",
+      "end": "0xFFFFFFFF",
+      "description": "Peripheral bus controller 0 space",
+      "source": "mcf5441x_rm",
+      "source_ref": "chapter 1 table 1-2; pages/p0056.txt"
+    }
+  ],
+  "section_load_addresses": [
+    {
+      "section_id": 5,
+      "dest_field": "0x00000000",
+      "packed_bytes": 15,
+      "is_load_address": false,
+      "note": "dest is 0x00000000 -- NOT a load address; where this section loads is not stated by the container"
+    },
+    {
+      "section_id": 2,
+      "dest_field": "0x03000900",
+      "packed_bytes": 15128,
+      "is_load_address": true,
+      "note": "version word, not a load address (dt2/container.py)"
+    },
+    {
+      "section_id": 3,
+      "dest_field": "0x40000400",
+      "packed_bytes": 971176,
+      "is_load_address": true,
+      "note": ""
+    },
+    {
+      "section_id": 4,
+      "dest_field": "0x80000400",
+      "packed_bytes": 32776,
+      "is_load_address": true,
+      "note": ""
+    },
+    {
+      "section_id": 8,
+      "dest_field": "0x00000000",
+      "packed_bytes": 103416,
+      "is_load_address": false,
+      "note": "dest is 0x00000000 -- NOT a load address; where this section loads is not stated by the container"
+    }
+  ],
+  "snapshot": "gui.snap",
+  "mapped_regions": [
+    {
+      "start": "0x00000000",
+      "end": "0x00100000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40000000",
+      "end": "0x40100000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40100000",
+      "end": "0x40200000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40200000",
+      "end": "0x40300000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40300000",
+      "end": "0x40400000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40400000",
+      "end": "0x40500000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40500000",
+      "end": "0x40600000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40600000",
+      "end": "0x40700000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40700000",
+      "end": "0x40800000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40800000",
+      "end": "0x40900000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40900000",
+      "end": "0x40A00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40A00000",
+      "end": "0x40B00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40B00000",
+      "end": "0x40C00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40C00000",
+      "end": "0x40D00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40D00000",
+      "end": "0x40E00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40E00000",
+      "end": "0x40F00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x40F00000",
+      "end": "0x41000000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41000000",
+      "end": "0x41100000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41100000",
+      "end": "0x41200000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41200000",
+      "end": "0x41300000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41300000",
+      "end": "0x41400000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41400000",
+      "end": "0x41500000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41500000",
+      "end": "0x41600000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41600000",
+      "end": "0x41700000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41700000",
+      "end": "0x41800000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41800000",
+      "end": "0x41900000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41900000",
+      "end": "0x41A00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41A00000",
+      "end": "0x41B00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41B00000",
+      "end": "0x41C00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41C00000",
+      "end": "0x41D00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41D00000",
+      "end": "0x41E00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41E00000",
+      "end": "0x41F00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x41F00000",
+      "end": "0x42000000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42000000",
+      "end": "0x42100000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42100000",
+      "end": "0x42200000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42200000",
+      "end": "0x42300000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42300000",
+      "end": "0x42400000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42400000",
+      "end": "0x42500000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42500000",
+      "end": "0x42600000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42600000",
+      "end": "0x42700000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42700000",
+      "end": "0x42800000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42800000",
+      "end": "0x42900000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42900000",
+      "end": "0x42A00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42A00000",
+      "end": "0x42B00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42B00000",
+      "end": "0x42C00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42C00000",
+      "end": "0x42D00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42D00000",
+      "end": "0x42E00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42E00000",
+      "end": "0x42F00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x42F00000",
+      "end": "0x43000000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43000000",
+      "end": "0x43100000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43100000",
+      "end": "0x43200000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43200000",
+      "end": "0x43300000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43300000",
+      "end": "0x43400000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43400000",
+      "end": "0x43500000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43500000",
+      "end": "0x43600000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43600000",
+      "end": "0x43700000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43700000",
+      "end": "0x43800000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43800000",
+      "end": "0x43900000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x43900000",
+      "end": "0x43A00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x47F00000",
+      "end": "0x48000000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x4B900000",
+      "end": "0x4BA00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x4BA00000",
+      "end": "0x4BB00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x4FC00000",
+      "end": "0x4FD00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x4FD00000",
+      "end": "0x4FE00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x4FE00000",
+      "end": "0x4FF00000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x4FF00000",
+      "end": "0x50000000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0x80000000",
+      "end": "0x80100000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0xEC000000",
+      "end": "0xEC100000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    },
+    {
+      "start": "0xFC000000",
+      "end": "0xFC100000",
+      "size_bytes": 1048576,
+      "size_human": "1 MiB",
+      "perms": 7
+    }
+  ],
+  "mapped_total_bytes": 72351744
+}

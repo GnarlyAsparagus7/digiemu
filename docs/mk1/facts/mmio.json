@@ -1,0 +1,921 @@
+{
+  "document": "digitakt-mk1.mmio-inventory",
+  "schema_version": 1,
+  "method": "addresses appearing in the OPERAND POSITION of an m68k absolute-long instruction (pea/jsr/jmp/lea/move/tst/clr) in the decompressed MAIN OS, grouped into 16KB blocks",
+  "caveat": "an opcode-anchored hit is strong evidence but not proof: the scan is not a disassembly, so a byte pair inside data can still look like an opcode. Clustering (many distinct offsets in one block) is the corroborating signal.",
+  "loose_vs_anchored": {
+    "anchored_total": 1699,
+    "loose_total": 14981,
+    "note": "loose counts every 32-bit value in a window regardless of context. The ratio shows how badly the naive method over-reports; the tables below use the anchored counts."
+  },
+  "image": {
+    "name": "section_3_MAIN_OS.bin",
+    "bytes": 2475584,
+    "load_address": "0x40000400"
+  },
+  "windows_scanned": [
+    {
+      "start": "0x80000000",
+      "end": "0x80010000",
+      "label": "internal SRAM (64 KiB)"
+    },
+    {
+      "start": "0x8C000000",
+      "end": "0x8C100000",
+      "label": "Rapid GPIO space / FlexBus coprocessor port"
+    },
+    {
+      "start": "0xEC000000",
+      "end": "0xEC100000",
+      "label": "peripheral bus 1"
+    },
+    {
+      "start": "0xFC000000",
+      "end": "0xFC100000",
+      "label": "peripheral bus 2 / SoC registers"
+    }
+  ],
+  "blocks": [
+    {
+      "base": "0xFC05C000",
+      "name": "DSPI0",
+      "identified_from": "m5441xsim.h MCFDSPI_BASE0 0xfc05c000",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 313,
+      "distinct_offsets": 5,
+      "offsets_sample": [
+        "0x000",
+        "0x00c",
+        "0x02c",
+        "0x034",
+        "0x038"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0x80000000",
+      "name": "UNIDENTIFIED",
+      "identified_from": "not in the contract and not in this tool's supplementary table",
+      "window": "internal SRAM (64 KiB)",
+      "references": 230,
+      "distinct_offsets": 106,
+      "offsets_sample": [
+        "0x000",
+        "0x004",
+        "0x008",
+        "0x00c",
+        "0x028",
+        "0x02c",
+        "0x030",
+        "0x034",
+        "0x040",
+        "0x044",
+        "0x048",
+        "0x04c"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC044000",
+      "name": "eDMA controller",
+      "identified_from": "contract:edma",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 213,
+      "distinct_offsets": 101,
+      "offsets_sample": [
+        "0x000",
+        "0x018",
+        "0x019",
+        "0x01c",
+        "0x13c0",
+        "0x13c4",
+        "0x13c6",
+        "0x13c8",
+        "0x13cc",
+        "0x13d0",
+        "0x13d4",
+        "0x13d6"
+      ],
+      "modelled_by": "emu/edma.py (eDMA), emu/edma_sw.py (software-started channels)"
+    },
+    {
+      "base": "0x8000C000",
+      "name": "UNIDENTIFIED",
+      "identified_from": "not in the contract and not in this tool's supplementary table",
+      "window": "internal SRAM (64 KiB)",
+      "references": 212,
+      "distinct_offsets": 122,
+      "offsets_sample": [
+        "0x000",
+        "0x10cc",
+        "0x10d0",
+        "0x10d8",
+        "0x10e4",
+        "0x10e8",
+        "0x10ec",
+        "0x10f8",
+        "0x1178",
+        "0x11b8",
+        "0x11bc",
+        "0x11c0"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xEC094000",
+      "name": "GPIO ports",
+      "identified_from": "contract:gpio",
+      "window": "peripheral bus 1",
+      "references": 192,
+      "distinct_offsets": 44,
+      "offsets_sample": [
+        "0x00c",
+        "0x00d",
+        "0x00e",
+        "0x00f",
+        "0x010",
+        "0x011",
+        "0x012",
+        "0x013",
+        "0x014",
+        "0x015",
+        "0x016",
+        "0x018"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC0B0000",
+      "name": "USB OTG (ChipIdea/EHCI)",
+      "identified_from": "MCF5441x RM; corroborated by the vector 209 handler reading 0xFC0B014C/1A4",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 143,
+      "distinct_offsets": 22,
+      "offsets_sample": [
+        "0x000",
+        "0x080",
+        "0x084",
+        "0x140",
+        "0x144",
+        "0x148",
+        "0x14c",
+        "0x158",
+        "0x160",
+        "0x178",
+        "0x184",
+        "0x1a4"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC0CC000",
+      "name": "eSDHC (SD/eMMC controller)",
+      "identified_from": "contract:esdhc",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 117,
+      "distinct_offsets": 14,
+      "offsets_sample": [
+        "0x004",
+        "0x008",
+        "0x00c",
+        "0x010",
+        "0x014",
+        "0x018",
+        "0x01c",
+        "0x020",
+        "0x024",
+        "0x028",
+        "0x02c",
+        "0x030"
+      ],
+      "modelled_by": "emu/esdhc.py (eSDHC)"
+    },
+    {
+      "base": "0xFC03C000",
+      "name": "DSPI1",
+      "identified_from": "m5441xsim.h MCFDSPI_BASE1 0xfc03c000",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 47,
+      "distinct_offsets": 7,
+      "offsets_sample": [
+        "0x000",
+        "0x014",
+        "0x018",
+        "0x02c",
+        "0x030",
+        "0x034",
+        "0x038"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC04C000",
+      "name": "INTC1",
+      "identified_from": "m5441xsim.h MCFINTC1_SIMR 0xfc04c01c",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 31,
+      "distinct_offsets": 13,
+      "offsets_sample": [
+        "0x010",
+        "0x01c",
+        "0x01d",
+        "0x046",
+        "0x05a",
+        "0x05b",
+        "0x05c",
+        "0x05d",
+        "0x06c",
+        "0x06e",
+        "0x074",
+        "0x075"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC050000",
+      "name": "INTC2",
+      "identified_from": "m5441xsim.h MCFINTC2_SIMR 0xfc05001c",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 26,
+      "distinct_offsets": 11,
+      "offsets_sample": [
+        "0x014",
+        "0x01c",
+        "0x01d",
+        "0x040",
+        "0x04d",
+        "0x04f",
+        "0x050",
+        "0x051",
+        "0x05d",
+        "0x05e",
+        "0x05f"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xEC070000",
+      "name": "UART8 (INTC1 source 52, vector 180)",
+      "identified_from": "contract:uart",
+      "window": "peripheral bus 1",
+      "references": 24,
+      "distinct_offsets": 6,
+      "offsets_sample": [
+        "0x000",
+        "0x004",
+        "0x008",
+        "0x00c",
+        "0x014",
+        "0x01c"
+      ],
+      "modelled_by": "emu/longrun.py (UART8 panel link)"
+    },
+    {
+      "base": "0xFC0C8000",
+      "name": "SSI 1 (synchronous serial -- AUDIO)",
+      "identified_from": "MCF5441x RM table 1-3 slot 50",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 21,
+      "distinct_offsets": 7,
+      "offsets_sample": [
+        "0x000",
+        "0x010",
+        "0x018",
+        "0x01c",
+        "0x020",
+        "0x024",
+        "0x02c"
+      ],
+      "modelled_by": "emu/ssi.py (SSI1 -- audio transmit and receive)"
+    },
+    {
+      "base": "0xEC074000",
+      "name": "UART9 (INTC1 source 53, vector 181)",
+      "identified_from": "contract:uart",
+      "window": "peripheral bus 1",
+      "references": 20,
+      "distinct_offsets": 6,
+      "offsets_sample": [
+        "0x000",
+        "0x004",
+        "0x008",
+        "0x00c",
+        "0x014",
+        "0x01c"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC040000",
+      "name": "SCM (system control; holds PPMSR/PPMCR/WCR)",
+      "identified_from": "MCF5441x RM table 1-3 slot 16; the power-management registers live inside it -- m5441xsim.h MCFPM_PPMCR0 0xfc04002d, MCFPM_WCR 0xfc040013",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 19,
+      "distinct_offsets": 3,
+      "offsets_sample": [
+        "0x024",
+        "0x02d",
+        "0x02f"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xEC090000",
+      "name": "CCM / chip configuration",
+      "identified_from": "m5441xsim.h MCF_CCM_CCR 0xec090004",
+      "window": "peripheral bus 1",
+      "references": 15,
+      "distinct_offsets": 4,
+      "offsets_sample": [
+        "0x000",
+        "0x00e",
+        "0x014",
+        "0x01a"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC090000",
+      "name": "EPORT0 (edge port)",
+      "identified_from": "m5441xsim.h MCFEPORT_EPPAR 0xfc090000; corroborated by the vector 66 and 67 handlers acking 0xFC090003/6",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 12,
+      "distinct_offsets": 3,
+      "offsets_sample": [
+        "0x000",
+        "0x003",
+        "0x006"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC048000",
+      "name": "INTC0",
+      "identified_from": "m5441xsim.h MCFINTC0_SIMR 0xfc04801c",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 12,
+      "distinct_offsets": 8,
+      "offsets_sample": [
+        "0x01c",
+        "0x01d",
+        "0x042",
+        "0x043",
+        "0x061",
+        "0x063",
+        "0x06c",
+        "0x079"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC084000",
+      "name": "PIT1 (INTC2 source 14, vector 206)",
+      "identified_from": "contract:pit",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 12,
+      "distinct_offsets": 2,
+      "offsets_sample": [
+        "0x000",
+        "0x002"
+      ],
+      "modelled_by": "emu/pit.py (PIT1, listed not delivered)"
+    },
+    {
+      "base": "0xFC08C000",
+      "name": "PIT3 (INTC2 source 16, vector 208)",
+      "identified_from": "contract:pit",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 10,
+      "distinct_offsets": 2,
+      "offsets_sample": [
+        "0x000",
+        "0x002"
+      ],
+      "modelled_by": "emu/pit.py (PIT3)"
+    },
+    {
+      "base": "0xFC070000",
+      "name": "DMA timer 0 (INTC0 source 32, vector 96)",
+      "identified_from": "contract:dtim",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 8,
+      "distinct_offsets": 1,
+      "offsets_sample": [
+        "0x00c"
+      ],
+      "modelled_by": "emu/dtim.py (DTIM0)"
+    },
+    {
+      "base": "0xFC07C000",
+      "name": "DMA timer 3 (INTC0 source 35, vector 99)",
+      "identified_from": "contract:dtim",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 4,
+      "distinct_offsets": 4,
+      "offsets_sample": [
+        "0x000",
+        "0x003",
+        "0x004",
+        "0x00c"
+      ],
+      "modelled_by": "emu/dtim.py (DTIM3)"
+    },
+    {
+      "base": "0xFC074000",
+      "name": "DMA timer 1 (INTC0 source 33, vector 97)",
+      "identified_from": "contract:dtim",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 4,
+      "distinct_offsets": 3,
+      "offsets_sample": [
+        "0x000",
+        "0x003",
+        "0x004"
+      ],
+      "modelled_by": "emu/dtim.py (DTIM1)"
+    },
+    {
+      "base": "0xFC080000",
+      "name": "PIT0 (INTC2 source 13, vector 205)",
+      "identified_from": "contract:pit",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 3,
+      "distinct_offsets": 2,
+      "offsets_sample": [
+        "0x000",
+        "0x002"
+      ],
+      "modelled_by": "emu/pit.py (PIT0)"
+    },
+    {
+      "base": "0x80008000",
+      "name": "UNIDENTIFIED",
+      "identified_from": "not in the contract and not in this tool's supplementary table",
+      "window": "internal SRAM (64 KiB)",
+      "references": 3,
+      "distinct_offsets": 1,
+      "offsets_sample": [
+        "0x000"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC088000",
+      "name": "PIT2 (INTC2 source 15, vector 207)",
+      "identified_from": "contract:pit",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 3,
+      "distinct_offsets": 2,
+      "offsets_sample": [
+        "0x000",
+        "0x002"
+      ],
+      "modelled_by": "emu/pit.py (PIT2)"
+    },
+    {
+      "base": "0xFC078000",
+      "name": "DMA timer 2 (INTC0 source 34, vector 98)",
+      "identified_from": "contract:dtim",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 3,
+      "distinct_offsets": 2,
+      "offsets_sample": [
+        "0x000",
+        "0x00c"
+      ],
+      "modelled_by": "emu/dtim.py (DTIM2)"
+    },
+    {
+      "base": "0x80004000",
+      "name": "UNIDENTIFIED",
+      "identified_from": "not in the contract and not in this tool's supplementary table",
+      "window": "internal SRAM (64 KiB)",
+      "references": 1,
+      "distinct_offsets": 1,
+      "offsets_sample": [
+        "0x92a"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC00C000",
+      "name": "UNIDENTIFIED",
+      "identified_from": "not in the contract and not in this tool's supplementary table",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 1,
+      "distinct_offsets": 1,
+      "offsets_sample": [
+        "0x3c00"
+      ],
+      "modelled_by": null
+    }
+  ],
+  "referenced_but_not_modelled": [
+    {
+      "base": "0xFC05C000",
+      "name": "DSPI0",
+      "identified_from": "m5441xsim.h MCFDSPI_BASE0 0xfc05c000",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 313,
+      "distinct_offsets": 5,
+      "offsets_sample": [
+        "0x000",
+        "0x00c",
+        "0x02c",
+        "0x034",
+        "0x038"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0x80000000",
+      "name": "UNIDENTIFIED",
+      "identified_from": "not in the contract and not in this tool's supplementary table",
+      "window": "internal SRAM (64 KiB)",
+      "references": 230,
+      "distinct_offsets": 106,
+      "offsets_sample": [
+        "0x000",
+        "0x004",
+        "0x008",
+        "0x00c",
+        "0x028",
+        "0x02c",
+        "0x030",
+        "0x034",
+        "0x040",
+        "0x044",
+        "0x048",
+        "0x04c"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0x8000C000",
+      "name": "UNIDENTIFIED",
+      "identified_from": "not in the contract and not in this tool's supplementary table",
+      "window": "internal SRAM (64 KiB)",
+      "references": 212,
+      "distinct_offsets": 122,
+      "offsets_sample": [
+        "0x000",
+        "0x10cc",
+        "0x10d0",
+        "0x10d8",
+        "0x10e4",
+        "0x10e8",
+        "0x10ec",
+        "0x10f8",
+        "0x1178",
+        "0x11b8",
+        "0x11bc",
+        "0x11c0"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xEC094000",
+      "name": "GPIO ports",
+      "identified_from": "contract:gpio",
+      "window": "peripheral bus 1",
+      "references": 192,
+      "distinct_offsets": 44,
+      "offsets_sample": [
+        "0x00c",
+        "0x00d",
+        "0x00e",
+        "0x00f",
+        "0x010",
+        "0x011",
+        "0x012",
+        "0x013",
+        "0x014",
+        "0x015",
+        "0x016",
+        "0x018"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC0B0000",
+      "name": "USB OTG (ChipIdea/EHCI)",
+      "identified_from": "MCF5441x RM; corroborated by the vector 209 handler reading 0xFC0B014C/1A4",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 143,
+      "distinct_offsets": 22,
+      "offsets_sample": [
+        "0x000",
+        "0x080",
+        "0x084",
+        "0x140",
+        "0x144",
+        "0x148",
+        "0x14c",
+        "0x158",
+        "0x160",
+        "0x178",
+        "0x184",
+        "0x1a4"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC03C000",
+      "name": "DSPI1",
+      "identified_from": "m5441xsim.h MCFDSPI_BASE1 0xfc03c000",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 47,
+      "distinct_offsets": 7,
+      "offsets_sample": [
+        "0x000",
+        "0x014",
+        "0x018",
+        "0x02c",
+        "0x030",
+        "0x034",
+        "0x038"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC04C000",
+      "name": "INTC1",
+      "identified_from": "m5441xsim.h MCFINTC1_SIMR 0xfc04c01c",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 31,
+      "distinct_offsets": 13,
+      "offsets_sample": [
+        "0x010",
+        "0x01c",
+        "0x01d",
+        "0x046",
+        "0x05a",
+        "0x05b",
+        "0x05c",
+        "0x05d",
+        "0x06c",
+        "0x06e",
+        "0x074",
+        "0x075"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC050000",
+      "name": "INTC2",
+      "identified_from": "m5441xsim.h MCFINTC2_SIMR 0xfc05001c",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 26,
+      "distinct_offsets": 11,
+      "offsets_sample": [
+        "0x014",
+        "0x01c",
+        "0x01d",
+        "0x040",
+        "0x04d",
+        "0x04f",
+        "0x050",
+        "0x051",
+        "0x05d",
+        "0x05e",
+        "0x05f"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xEC074000",
+      "name": "UART9 (INTC1 source 53, vector 181)",
+      "identified_from": "contract:uart",
+      "window": "peripheral bus 1",
+      "references": 20,
+      "distinct_offsets": 6,
+      "offsets_sample": [
+        "0x000",
+        "0x004",
+        "0x008",
+        "0x00c",
+        "0x014",
+        "0x01c"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC040000",
+      "name": "SCM (system control; holds PPMSR/PPMCR/WCR)",
+      "identified_from": "MCF5441x RM table 1-3 slot 16; the power-management registers live inside it -- m5441xsim.h MCFPM_PPMCR0 0xfc04002d, MCFPM_WCR 0xfc040013",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 19,
+      "distinct_offsets": 3,
+      "offsets_sample": [
+        "0x024",
+        "0x02d",
+        "0x02f"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xEC090000",
+      "name": "CCM / chip configuration",
+      "identified_from": "m5441xsim.h MCF_CCM_CCR 0xec090004",
+      "window": "peripheral bus 1",
+      "references": 15,
+      "distinct_offsets": 4,
+      "offsets_sample": [
+        "0x000",
+        "0x00e",
+        "0x014",
+        "0x01a"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC090000",
+      "name": "EPORT0 (edge port)",
+      "identified_from": "m5441xsim.h MCFEPORT_EPPAR 0xfc090000; corroborated by the vector 66 and 67 handlers acking 0xFC090003/6",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 12,
+      "distinct_offsets": 3,
+      "offsets_sample": [
+        "0x000",
+        "0x003",
+        "0x006"
+      ],
+      "modelled_by": null
+    },
+    {
+      "base": "0xFC048000",
+      "name": "INTC0",
+      "identified_from": "m5441xsim.h MCFINTC0_SIMR 0xfc04801c",
+      "window": "peripheral bus 2 / SoC registers",
+      "references": 12,
+      "distinct_offsets": 8,
+      "offsets_sample": [
+        "0x01c",
+        "0x01d",
+        "0x042",
+        "0x043",
+        "0x061",
+        "0x063",
+        "0x06c",
+        "0x079"
+      ],
+      "modelled_by": null
+    }
+  ],
+  "power_management": {
+    "registers": {
+      "0xfc04002c": "PPMSR0 (disable)",
+      "0xfc04002d": "PPMCR0 (enable)",
+      "0xfc04002e": "PPMSR1 (disable)",
+      "0xfc04002f": "PPMCR1 (enable)"
+    },
+    "source": "Linux arch/m68k/include/asm/m5441xsim.h MCFPM_PPMSR0/PPMCR0/PPMSR1/PPMCR1 at 0xfc04002c..0xfc04002f",
+    "modules_enabled": {
+      "PPMCR0 (enable)": [
+        15,
+        17,
+        18,
+        19,
+        20,
+        23,
+        29,
+        31,
+        32,
+        36,
+        44
+      ]
+    },
+    "module_names": {
+      "9": "FlexCAN 1",
+      "14": "I2C 1",
+      "15": "DSPI 1",
+      "16": "SCM",
+      "17": "eDMA controller",
+      "18": "Interrupt controller 0",
+      "19": "Interrupt controller 1",
+      "20": "Interrupt controller 2",
+      "21": "Interrupt controller IACK",
+      "22": "I2C 0",
+      "23": "DSPI 0",
+      "24": "UART0",
+      "25": "UART1",
+      "26": "UART2",
+      "27": "UART3",
+      "28": "DMA timer 0",
+      "29": "DMA timer 1",
+      "30": "DMA timer 2",
+      "31": "DMA timer 3",
+      "32": "PIT 0",
+      "33": "PIT 1",
+      "34": "PIT 2",
+      "35": "PIT 3",
+      "36": "Edge port 0",
+      "37": "ADC",
+      "38": "DAC 0",
+      "39": "DAC 1",
+      "42": "Robust real-time clock",
+      "43": "SIM",
+      "44": "USB On-the-Go",
+      "45": "USB host",
+      "46": "DDR controller",
+      "47": "SSI 0",
+      "48": "PLL",
+      "49": "Random number generator",
+      "50": "SSI 1",
+      "51": "eSDHC",
+      "53": "MAC-NET0",
+      "54": "MAC-NET1"
+    },
+    "module_name_source": "MCF5441x Reference Manual Rev 5, Table 1-3 \"Peripheral Bus Controller 0 Memory Map\", chapter 1 page 1-17. The slot number in that table IS the PPMCR module number.",
+    "enabled_named": {
+      "PPMCR0 (enable)": [
+        {
+          "module": 15,
+          "name": "DSPI 1"
+        },
+        {
+          "module": 17,
+          "name": "eDMA controller"
+        },
+        {
+          "module": 18,
+          "name": "Interrupt controller 0"
+        },
+        {
+          "module": 19,
+          "name": "Interrupt controller 1"
+        },
+        {
+          "module": 20,
+          "name": "Interrupt controller 2"
+        },
+        {
+          "module": 23,
+          "name": "DSPI 0"
+        },
+        {
+          "module": 29,
+          "name": "DMA timer 1"
+        },
+        {
+          "module": 31,
+          "name": "DMA timer 3"
+        },
+        {
+          "module": 32,
+          "name": "PIT 0"
+        },
+        {
+          "module": 36,
+          "name": "Edge port 0"
+        },
+        {
+          "module": 44,
+          "name": "USB On-the-Go"
+        }
+      ]
+    },
+    "cross_check": "Every enabled module is independently corroborated by this document or 04-vectors.md: DSPI0 (23) is the most-referenced block, eDMA (17) has 213 references, DMA timers 1 and 3 (29, 31) are the only two with installed vectors (97, 99), PIT0 (32) has vector 205, Edge port 0 (36) has vectors 66 and 67, and USB OTG (44) has 143 references and vector 209."
+  },
+  "claim_checks": [
+    {
+      "claim": "The mk1 MAIN OS uses the 0x8C000000 FlexBus port that emu/dsp.py models for Digitakt II.",
+      "answer": "NO",
+      "evidence": {
+        "address": "0x8C000000",
+        "raw_byte_pattern_occurrences": 39,
+        "at_even_offsets": 1,
+        "at_odd_offsets": 38,
+        "opcode_anchored_references": 0,
+        "verdict": "NOT REFERENCED",
+        "reasoning": "m68k instructions and their operands are always 2-byte aligned, so a match at an odd offset cannot be an instruction operand. Only opcode-anchored hits count as references."
+      },
+      "consequence": "Passing dsp=True to longrun.build models a port this firmware never touches. Any reading of the dsp Fifo counters (polls/words/bursts) on mk1 is therefore vacuous, not informative."
+    },
+    {
+      "claim": "The mk1 coprocessor link is DSPI.",
+      "answer": "CONSISTENT WITH THE EVIDENCE, not proven here",
+      "evidence": {
+        "DSPI0_0xFC05C000": {
+          "address": "0xFC05C000",
+          "raw_byte_pattern_occurrences": 59,
+          "at_even_offsets": 59,
+          "at_odd_offsets": 0,
+          "opcode_anchored_references": 59,
+          "verdict": "REFERENCED",
+          "reasoning": "m68k instructions and their operands are always 2-byte aligned, so a match at an odd offset cannot be an instruction operand. Only opcode-anchored hits count as references."
+        },
+        "DSPI1_0xFC03C000": {
+          "address": "0xFC03C000",
+          "raw_byte_pattern_occurrences": 9,
+          "at_even_offsets": 9,
+          "at_odd_offsets": 0,
+          "opcode_anchored_references": 9,
+          "verdict": "REFERENCED",
+          "reasoning": "m68k instructions and their operands are always 2-byte aligned, so a match at an odd offset cannot be an instruction operand. Only opcode-anchored hits count as references."
+        }
+      },
+      "consequence": "DSPI0 is the most-referenced peripheral block in the image and nothing models it. What travels over it has NOT been established by this document."
+    }
+  ]
+}

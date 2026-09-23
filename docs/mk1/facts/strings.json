@@ -1,0 +1,330 @@
+{
+  "document": "digitakt-mk1.string-tables",
+  "schema_version": 1,
+  "method": "runs of >= 6 consecutive 32-bit big-endian pointers that all land on printable NUL-terminated strings inside the image",
+  "caveat": "a table found this way is evidence of a LIST, not of its purpose. The 48-entry table at 0x4018E254 is the hardware panel-test screen label list, NOT the runtime key map -- reading it as the key map cost this project real time. Do not name a table by what its contents look like.",
+  "tables_found": 173,
+  "tables_reported": 40,
+  "tables": [
+    {
+      "table_address": "0x40202560",
+      "entries": 6206,
+      "first_string_address": "0x401DA6CD",
+      "string_length_min": 2,
+      "string_length_max": 19,
+      "entries_with_letters": 6206
+    },
+    {
+      "table_address": "0x4020865C",
+      "entries": 2992,
+      "first_string_address": "0x401D270C",
+      "string_length_min": 2,
+      "string_length_max": 22,
+      "entries_with_letters": 2992
+    },
+    {
+      "table_address": "0x4020DB7C",
+      "entries": 208,
+      "first_string_address": "0x401E8199",
+      "string_length_min": 3,
+      "string_length_max": 14,
+      "entries_with_letters": 73
+    },
+    {
+      "table_address": "0x4020BBA0",
+      "entries": 128,
+      "first_string_address": "0x400D484C",
+      "string_length_min": 6,
+      "string_length_max": 6,
+      "entries_with_letters": 128
+    },
+    {
+      "table_address": "0x4018D1E4",
+      "entries": 80,
+      "first_string_address": "0x401C6630",
+      "string_length_min": 2,
+      "string_length_max": 4,
+      "entries_with_letters": 23
+    },
+    {
+      "table_address": "0x401A99C4",
+      "entries": 39,
+      "first_string_address": "0x401D191E",
+      "string_length_min": 2,
+      "string_length_max": 7,
+      "entries_with_letters": 39
+    },
+    {
+      "table_address": "0x402024D4",
+      "entries": 34,
+      "first_string_address": "0x401E20E9",
+      "string_length_min": 2,
+      "string_length_max": 8,
+      "entries_with_letters": 30
+    },
+    {
+      "table_address": "0x4018E278",
+      "entries": 30,
+      "first_string_address": "0x401CBCCA",
+      "string_length_min": 2,
+      "string_length_max": 12,
+      "entries_with_letters": 23
+    },
+    {
+      "table_address": "0x401B23B0",
+      "entries": 25,
+      "first_string_address": "0x401B2348",
+      "string_length_min": 4,
+      "string_length_max": 34,
+      "entries_with_letters": 2
+    },
+    {
+      "table_address": "0x401F5794",
+      "entries": 22,
+      "first_string_address": "0x401C2872",
+      "string_length_min": 2,
+      "string_length_max": 13,
+      "entries_with_letters": 22
+    },
+    {
+      "table_address": "0x401BE690",
+      "entries": 21,
+      "first_string_address": "0x401E7F6F",
+      "string_length_min": 10,
+      "string_length_max": 34,
+      "entries_with_letters": 21
+    },
+    {
+      "table_address": "0x40180324",
+      "entries": 18,
+      "first_string_address": "0x4013F720",
+      "string_length_min": 2,
+      "string_length_max": 10,
+      "entries_with_letters": 15
+    },
+    {
+      "table_address": "0x40180440",
+      "entries": 18,
+      "first_string_address": "0x4013F720",
+      "string_length_min": 2,
+      "string_length_max": 10,
+      "entries_with_letters": 15
+    },
+    {
+      "table_address": "0x401811AC",
+      "entries": 18,
+      "first_string_address": "0x40142382",
+      "string_length_min": 2,
+      "string_length_max": 7,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x401812A8",
+      "entries": 18,
+      "first_string_address": "0x40142382",
+      "string_length_min": 2,
+      "string_length_max": 7,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x40181AEC",
+      "entries": 18,
+      "first_string_address": "0x4014388C",
+      "string_length_min": 2,
+      "string_length_max": 10,
+      "entries_with_letters": 15
+    },
+    {
+      "table_address": "0x40181BE8",
+      "entries": 18,
+      "first_string_address": "0x4014388C",
+      "string_length_min": 2,
+      "string_length_max": 10,
+      "entries_with_letters": 15
+    },
+    {
+      "table_address": "0x401AE9A8",
+      "entries": 18,
+      "first_string_address": "0x4015DCDA",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 15
+    },
+    {
+      "table_address": "0x4017DAFC",
+      "entries": 17,
+      "first_string_address": "0x4013B4E8",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017DBF8",
+      "entries": 17,
+      "first_string_address": "0x4013B4E8",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017DEF0",
+      "entries": 17,
+      "first_string_address": "0x4013BBFC",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017DFEC",
+      "entries": 17,
+      "first_string_address": "0x4013BBFC",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017E818",
+      "entries": 17,
+      "first_string_address": "0x4013CAB8",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017E914",
+      "entries": 17,
+      "first_string_address": "0x4013CAB8",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017F0AC",
+      "entries": 17,
+      "first_string_address": "0x4013DF46",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017F264",
+      "entries": 17,
+      "first_string_address": "0x4013E0AC",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017F360",
+      "entries": 17,
+      "first_string_address": "0x4013DF46",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017F4F4",
+      "entries": 17,
+      "first_string_address": "0x4013E0AC",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017F7B4",
+      "entries": 17,
+      "first_string_address": "0x4013EB4E",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4017F8B0",
+      "entries": 17,
+      "first_string_address": "0x4013EB4E",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x4018085C",
+      "entries": 17,
+      "first_string_address": "0x401417B8",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x40180958",
+      "entries": 17,
+      "first_string_address": "0x401417B8",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x401809E0",
+      "entries": 17,
+      "first_string_address": "0x401417E4",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x40180D6C",
+      "entries": 17,
+      "first_string_address": "0x40141CC2",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x40180E68",
+      "entries": 17,
+      "first_string_address": "0x40141CC2",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x40180EEC",
+      "entries": 17,
+      "first_string_address": "0x40141CEE",
+      "string_length_min": 2,
+      "string_length_max": 10,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x401815B8",
+      "entries": 17,
+      "first_string_address": "0x401431D8",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x401816B4",
+      "entries": 17,
+      "first_string_address": "0x401431D8",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x401AE3E0",
+      "entries": 17,
+      "first_string_address": "0x4015CFDA",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    },
+    {
+      "table_address": "0x401AE4DC",
+      "entries": 17,
+      "first_string_address": "0x4015CFDA",
+      "string_length_min": 2,
+      "string_length_max": 6,
+      "entries_with_letters": 14
+    }
+  ]
+}

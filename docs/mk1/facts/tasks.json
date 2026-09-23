@@ -1,0 +1,66 @@
+{
+  "document": "digitakt-mk1.tasks",
+  "schema_version": 1,
+  "method": "captured during a boot from boot400M.snap over 160M instructions, using the mk1 intro policy",
+  "tcb_layout": {
+    "next_pointer": "+0x00",
+    "registers_d0_d7_a0_a7": "+0x0C",
+    "saved_a7": "+0x48",
+    "source": "derived from the context switcher at 0x40000410; see emu/tasks.py"
+  },
+  "current_tcb": "0x4060FBD4",
+  "task_count": 4,
+  "tasks": [
+    {
+      "entry": "0x400E7A68",
+      "priority": 4,
+      "tcb": "0x421D1EFC",
+      "parked_pc": "0x4000176C"
+    },
+    {
+      "entry": "0x400E7B8E",
+      "priority": 4,
+      "tcb": "0x421D1E88",
+      "parked_pc": "0x4000176C"
+    },
+    {
+      "entry": "0x400E7914",
+      "priority": 5,
+      "tcb": "0x421D1F70",
+      "parked_pc": "0x4000176C"
+    },
+    {
+      "entry": "0x400E5E1A",
+      "priority": 6,
+      "tcb": "0x421CD4F8",
+      "parked_pc": "0x400016FA"
+    }
+  ],
+  "capture_limitation": "ev['tasks'] records only tasks CREATED during this run. A boot resumed from a ladder rung misses every task created before that rung was captured, so this list is not the whole system.",
+  "tcb_chain_walk": [
+    {
+      "tcb": "0x41980928",
+      "priority": 0,
+      "parked_pc": "0x40068E34",
+      "is_current": false
+    },
+    {
+      "tcb": "0x4198497C",
+      "priority": 1,
+      "parked_pc": "0x4006932E",
+      "is_current": false
+    },
+    {
+      "tcb": "0x419A29DC",
+      "priority": 2,
+      "parked_pc": "0x4007C922",
+      "is_current": false
+    },
+    {
+      "tcb": "0x4060FBD4",
+      "priority": 6,
+      "parked_pc": null,
+      "is_current": true
+    }
+  ]
+}

@@ -1,0 +1,318 @@
+# Digitakt (mk1).
+#
+# Same rule as digitakt-ii.toml: NO control names and NO guest addresses here.
+# Names come from the firmware's own 48-entry control table (0x4018e254 in
+# OS 1.53) via emu/symbols.py, so they cannot drift out of sync with the image.
+# What lives here is only what the image cannot tell us: which product this is,
+# and where each control physically sits on the scan matrix.
+#
+# CONTROL CODES ARE 0-BASED here and index that table directly: code 0 is trig
+# 1, code 47 is LEVEL/DATA. That is the firmware's own numbering -- the code
+# byte it writes into the queue_send event record -- not a convention chosen
+# here.
+#
+# THE WIRING IS MEASURED, NOT COMPUTED. emu/panelin.py's code_for() computes
+# channel*8 + bit + 1 and notes that holds on Digitakt II and Digitone II. It
+# does NOT hold on this product: the panel MCU scans the matrix in a different
+# order, so the trig keys are interleaved with the mode buttons across channels
+# 2-4 and the encoder pushes are scrambled within channel 5. Every position
+# below came from tools/mapsweep.py, which presses each (channel, bit) and
+# reads the code the firmware reports. linear_channels = 0 disables the
+# arithmetic fallback entirely so a missing entry fails loudly instead of
+# silently addressing the wrong key.
+
+[device]
+name = "Digitakt"
+short = "dt1"
+
+[[firmware]]
+version = "1.53"
+sha256 = "9bdd44bb6102fb25c143cfab97bc92b7a89c463f795d3112dce89771e29bcc92"
+filename = "Digitakt_OS1.53.syx"
+
+[panel]
+linear_channels = 0
+encoders = 9
+# The four pattern-page LEDs, page 1 first: LED ids from the firmware's RAM
+# table at [0x4060F620] (1-based there). Page 1 is dim at idle and bright
+# while playing or recording (measured).
+page_leds = [43, 42, 41, 40]
+
+# code = [channel, bit], measured. Channel 0 is transport + page column,
+# channel 1 the cursor cluster, channels 2-4 the sixteen trigs interleaved
+# with the mode buttons, channel 5 the encoder pushes.
+[panel.exceptions]
+24 = [0, 0]   # RECORD
+25 = [0, 1]   # PLAY
+26 = [0, 2]   # STOP
+27 = [0, 3]   # TRIG
+28 = [0, 4]   # SRC
+29 = [0, 5]   # FLTR
+30 = [0, 6]   # AMP
+31 = [0, 7]   # LFO
+32 = [1, 0]   # YES
+33 = [1, 1]   # NO
+34 = [1, 2]   # LEFT
+35 = [1, 3]   # UP
+36 = [1, 4]   # DOWN
+37 = [1, 5]   # RIGHT
+38 = [1, 6]   # PAGE
+39 = [1, 7]   # encoder A push
+2  = [2, 0]   # trig 3
+1  = [2, 1]   # trig 2
+19 = [2, 2]   # FUNC
+20 = [2, 3]   # PATTERN MENU
+0  = [2, 4]   # trig 1
+21 = [2, 5]   # GLOBAL
+22 = [2, 6]   # SAMPLE
+23 = [2, 7]   # TEMPO
+6  = [3, 0]   # trig 7
+7  = [3, 1]   # trig 8
+8  = [3, 2]   # trig 9
+13 = [3, 3]   # trig 14
+16 = [3, 4]   # BANK
+15 = [3, 5]   # trig 16
+17 = [3, 6]   # PTN
+18 = [3, 7]   # TRK
+4  = [4, 0]   # trig 5
+3  = [4, 1]   # trig 4
+5  = [4, 2]   # trig 6
+9  = [4, 3]   # trig 10
+10 = [4, 4]   # trig 11
+11 = [4, 5]   # trig 12
+12 = [4, 6]   # trig 13
+14 = [4, 7]   # trig 15
+# Named from measurement (40..47 = pushes A..H); the panel-test table
+# lists these one code early, which is why the old comments said B..H.
+46 = [5, 0]   # encoder G push
+45 = [5, 1]   # encoder F push
+44 = [5, 2]   # encoder E push
+41 = [5, 3]   # encoder B push
+40 = [5, 4]   # encoder A push
+43 = [5, 5]   # encoder D push
+42 = [5, 6]   # encoder C push
+47 = [5, 7]   # encoder H push
+
+# --- layout: how the controls are arranged on the faceplate ----------------
+
+# ---------------------------------------------------------------------------
+# MEASURED layout. Every code below was identified by pressing it from a fresh
+# resume and recording what the firmware actually did (tools/keymap.py), not
+# by reading the 48-entry table at 0x4018E254.
+#
+# That table labels the hardware PANEL-TEST screen, and its ordering is NOT
+# the runtime key map. The previous version of this file was built from it,
+# which is why the PLAY button sent code 25 -- a trig -- and why the page row
+# was off by eight.
+#
+# What the measurement showed:
+#   code 10          the only code that moves the transport flag at
+#                    0x4199DC2C (0 -> 1). That is PLAY, independent of what is
+#                    drawn on screen.
+#   codes 24..39     sixteen consecutive codes that select tracks. 24..31 draw
+#                    the audio SRC page (~1880 lit); 32..39 draw the MIDI
+#                    track page -- "MID E", CHAN/BANK/SBNK/PROG, PB/AT/MW/BC
+#                    (~1695 lit). Tracks 1-8 and MIDI tracks 9-16.
+#   codes 19..23     five distinct pages. Code 20 alone changes almost nothing
+#                    because boot already sits on the SRC page, which is what
+#                    identifies it as SRC.
+#   codes 40..47     channel 5, small changes only: the encoder pushes.
+#
+# Codes still UNVERIFIED are grouped at the end and labelled as such rather
+# than guessed at. They are clickable so they can be identified by use.
+# ---------------------------------------------------------------------------
+
+[[panel.group]]
+name = "trigs"          # tracks 1-8 (audio), 9-16 (MIDI)
+kind = "button"
+codes = [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
+layout = "grid"
+columns = 8
+
+[[panel.group]]
+name = "pages"          # TRIG, SRC, FLTR, AMP, LFO
+kind = "button"
+codes = [19, 20, 21, 22, 23]
+layout = "row"
+
+[[panel.group]]
+name = "transport"      # PLAY, STOP
+kind = "button"
+codes = [10, 11]
+layout = "row"
+
+[[panel.group]]
+name = "menus"          # BANK, SONG, SAMPLE, TEMPO
+kind = "button"
+codes = [4, 5, 7, 8]
+layout = "row"
+
+[[panel.group]]
+name = "encoder_push"   # A..H
+kind = "button"
+codes = [40, 41, 42, 43, 44, 45, 46, 47]
+layout = "grid"
+columns = 4
+
+
+# Measured names, which override the firmware's panel-test table. A code with
+# no entry here keeps whatever the table calls it, flagged in the GUI.
+[panel.labels]
+# MEASURED names (tools/keymap.py), keyed to the exact label strings
+# emu/dtpanel.py's BUTTONS layout uses. A code with no entry keeps
+# whatever the firmware's panel-test table calls it.
+10 = "PLAY"      # the only code that moves the transport flag
+11 = "STOP"
+19 = "TRIG"
+20 = "SRC"       # ~no visible change: boot already sits on SRC
+21 = "FLTR"
+22 = "AMP"
+23 = "LFO"
+4 = "BANK"
+7 = "SAMPLE"     # opens the RECORDER/sampling page
+8 = "TEMPO"
+3 = "PTN"        # its release shows "BANK A : SELECT PTN"
+1 = "FUNC"       # held, TEMPO becomes "Tap tempo" and SAMPLE changes too
+2 = "TRK"        # FUNC+TRK opens the chromatic keyboard, as on the hardware
+5 = "SONG"       # held: "SONG MODE OFF" popup; FUNC+SONG: the IMP/EXP menu
+9 = "RECORD"     # FUNC+RECORD: "Copy Pattern"
+18 = "PAGE"      # FUNC+PAGE: the SCALE setup (TRK.1 LENGTH / SCALE / CH.LEN)
+6 = "GLOBAL"     # opens the SETTINGS list (PROJECT/SAMPLES/SONG/PATTERN/MIDI CONFIG)
+13 = "NO"        # backs out: SETTINGS -> main page, sample browser -> SETTINGS;
+                 # FUNC+NO shows "Prj must be re-saved!". Swept 2026-09-22 over
+                 # all 48 codes from SETTINGS and /incoming with frames latched
+                 # at the flush entry: 13 is the only code that backs out
+                 # (GLOBAL toggles SETTINGS; YES on ".." goes up a folder).
+12 = "YES"       # in the SONG popup: "SWITCH ON" -> "SONG MODE ON"
+14 = "UP"        # in the SONG popup: the up-arrow item, MENU
+15 = "DOWN"      # in the IMP/EXP list: moves the highlight down (auto-repeats)
+16 = "LEFT"      # with TEMPO: tempo -1 per press; UP/DOWN are 14/15, so this pair is LEFT/RIGHT
+17 = "RIGHT"     # with TEMPO: tempo +1, auto-repeats while held
+# Code 0 is not a key. The firmware's panel-test names (0x4018E278) list 16
+# trigs and 23 function keys, and codes 1..23 are those 23; 0 did nothing
+# from the main page, SETTINGS or the browser. It has no label on purpose:
+# the GUI then draws no button for it. (It used to be "NO", which is why NO
+# could not back out of anything, and 13 was a second key called PATTERN
+# MENU -- the panel-test table's PATTERN MENU is the key named SONG here.)
+
+# The encoder push switches. The firmware's panel-test table lists them
+# one code early (39 = "A"), and 39 is trig 16, so knob A had no button
+# and B..H sat under the wrong knobs. Measured: 40..47 are the eight
+# pushes A..H on channel 5; the LEVEL/DATA push is not one of them.
+40 = "A"
+41 = "B"
+42 = "C"
+43 = "D"
+44 = "E"
+45 = "F"
+46 = "G"
+47 = "H"
+
+# The sixteen trig keys. 24..31 draw the audio SRC page, 32..39
+# the MIDI track page ("MID E", CHAN/BANK/SBNK/PROG) -- tracks
+# 1-8 and MIDI tracks 9-16 on the same sixteen keys.
+24 = "1"
+25 = "2"
+26 = "3"
+27 = "4"
+28 = "5"
+29 = "6"
+30 = "7"
+31 = "8"
+32 = "9"
+33 = "10"
+34 = "11"
+35 = "12"
+36 = "13"
+37 = "14"
+38 = "15"
+39 = "16"
+
+# Key LEDs: LED id (the panel MCU's numbering, emu/panelleds.py) = the button
+# code of the key it lights. From the firmware's LED-test tables (0x4018E4B0,
+# 0x4018E364, 0x4018E624); trigs, the page keys, STOP, TEMPO, YES, UP, DOWN,
+# 5, 6, 7, RECORD and PLAY were also confirmed by pressing the code and
+# watching its own LED light. TRK (38) is from the tables only. LED 39 is an
+# orange LED of unknown purpose and 40..43 are the pattern-page LEDs
+# ([panel] page_leds), so none of those has a key.
+[panel.leds]
+0 = 24
+1 = 25
+2 = 26
+3 = 27
+4 = 28
+5 = 29
+6 = 30
+7 = 31
+8 = 32
+9 = 33
+10 = 34
+11 = 35
+12 = 36
+13 = 37
+14 = 38
+15 = 39
+16 = 4    # BANK
+17 = 3    # PTN
+18 = 19   # TRIG page
+19 = 20   # SRC
+20 = 21   # FLTR
+21 = 22   # AMP
+22 = 23   # LFO
+23 = 18   # PAGE
+24 = 11   # STOP
+25 = 8    # TEMPO
+26 = 12   # YES
+27 = 13   # NO
+28 = 14   # UP
+29 = 16   # LEFT
+30 = 15   # DOWN
+31 = 17   # RIGHT
+32 = 1    # FUNC
+33 = 5    # the panel-test table's PATTERN MENU (SONG here)
+34 = 6    # GLOBAL
+35 = 7    # SAMPLE
+36 = 9    # RECORD
+37 = 10   # PLAY
+38 = 2    # TRK
+
+# Audio out. The render ISR (vector 191, FUN_40077420) fills a 512-byte
+# double buffer at 0x4ba8f080, 32 stereo frames per half, and eDMA channel 54
+# moves it to SSI1: each frame two 32-bit words carrying 24-bit samples,
+# right-justified. The engine's rate constant is 48000.
+#
+# LIVE (request_hz = 48000): with the accelerated Unicorn (fast-mem and
+# digikit-accel patches) the render runs at ~170% of real time, so the GUI
+# plays it as it is produced. The emulated CPU then needs a real budget:
+# `ips` instructions (the fast stepper's estimated units) per emulated second.
+# One render pass is ~26k units, 1500 a second, so ~39M for audio alone;
+# 64M leaves the UI room. Idle time costs nothing (build's fast_idle).
+#
+# FALLBACK (fallback_request_hz): a Unicorn without those patches renders
+# ~20x slower than real time. The GUI then runs the audio clock at 2 kHz
+# (above ~3 kHz the render starves the UI), records the output and plays it
+# back afterwards at 48 kHz -- correct pitch and timing, heard late. The
+# sequencer's time base is this clock, so it slows with it.
+[audio]
+ssi_profile = "digitakt-mk1"
+request_hz = 48000
+rate = 48000
+sample_bits = 24
+ips = 64000000
+fallback_request_hz = 2000
+
+[intro]
+channels = [3]
+unblocks_frame_sem = false
+
+# Timer rate once the intro hands over, in instructions per emulated second.
+# This is what decides how responsive the window feels, because emulated time
+# advances at host_instructions_per_second / post_intro_ips.
+#
+# emu/gui.py defaults to 4x INSTR_PER_SEC (18,720,000). Measured on this
+# firmware, that delivers 2.25M instructions/sec of host throughput, so
+# emulated time runs at 12% of real time and the UI feels heavily laggy. At
+# 1x (4,680,000) throughput falls only to 1.96M -- a 13% cost -- while
+# emulated time rises to 42% of real and the firmware's main loop runs 3.4x
+# as often over the same instruction budget.
+post_intro_ips = 4680000

@@ -1,0 +1,761 @@
+{
+  "document": "digitakt-mk1.symbols",
+  "schema_version": 1,
+  "image_sha256": "4b47a9507758ca5669ca02ab2c0374d2c04c98aece445408295cc1dcb265c5df",
+  "load_address": "0x40000400",
+  "total_symbols": 81,
+  "resolved": 80,
+  "unresolved": 1,
+  "resolved_by_rule_type": {
+    "AnyOf": 28,
+    "Xrefs": 2,
+    "XrefShape": 1,
+    "Operand": 13,
+    "Opcode": 1,
+    "Sig": 19,
+    "OperandGroup": 1,
+    "Pick": 2,
+    "Offset": 12,
+    "ScanAll": 1
+  },
+  "resolved_by_confidence": {
+    "mixed": 28,
+    "unclassified": 4,
+    "derived": 28,
+    "measured": 20
+  },
+  "note": "The rule type is the confidence signal. A Sig must match exactly once across the whole image; a Fixed is a literal address whose verify bytes must match but which nobody derived. Treat them differently.",
+  "symbols": [
+    {
+      "name": "entry",
+      "value": "0x400004E8",
+      "required": true,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400004e8"
+    },
+    {
+      "name": "task_create",
+      "value": "0x400015AC",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400015ac"
+    },
+    {
+      "name": "task_start",
+      "value": "0x400015F8",
+      "required": true,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400015f8"
+    },
+    {
+      "name": "sem_pend",
+      "value": "0x400016FE",
+      "required": true,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400016fe"
+    },
+    {
+      "name": "pend_b",
+      "value": "0x4000168A",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x4000168a"
+    },
+    {
+      "name": "task_create_sites",
+      "value": "[16 entries]",
+      "required": false,
+      "rule_type": "Xrefs",
+      "confidence": "unclassified",
+      "confidence_note": "",
+      "resolver_detail": "16 call site(s) to 0x400015ac"
+    },
+    {
+      "name": "pend_call",
+      "value": "0x400E8AFC",
+      "required": true,
+      "rule_type": "XrefShape",
+      "confidence": "unclassified",
+      "confidence_note": "",
+      "resolver_detail": "unique jsr 0x400016fe + shape 508f203c........ at 0x400e8afc"
+    },
+    {
+      "name": "completion_sem",
+      "value": "0x421ED5C8",
+      "required": true,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "pend_call+10 = 0x421ed5d0, -8 -> 0x421ed5c8"
+    },
+    {
+      "name": "depack_copy",
+      "value": "0x400EAAAC",
+      "required": true,
+      "rule_type": "Opcode",
+      "confidence": "unclassified",
+      "confidence_note": "",
+      "resolver_detail": "unique opcode at 0x400eaaac"
+    },
+    {
+      "name": "flash_read",
+      "value": "0x400E94F2",
+      "required": true,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x400e94f2"
+    },
+    {
+      "name": "panel_diff",
+      "value": "0x400E60E2",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x400e60e2"
+    },
+    {
+      "name": "_fb_pair",
+      "value": "[2 entries]",
+      "required": false,
+      "rule_type": "OperandGroup",
+      "confidence": "derived",
+      "confidence_note": "distinct absolute operands scanned from another symbol's code",
+      "resolver_detail": "2 distinct operand(s) near panel_diff: 0x4020d8f8, 0x4020d8fc"
+    },
+    {
+      "name": "fb_front",
+      "value": "0x4020D8F8",
+      "required": false,
+      "rule_type": "Pick",
+      "confidence": "derived",
+      "confidence_note": "one element of a resolved group",
+      "resolver_detail": "element 0 of _fb_pair"
+    },
+    {
+      "name": "fb_back",
+      "value": "0x4020D8FC",
+      "required": false,
+      "rule_type": "Pick",
+      "confidence": "derived",
+      "confidence_note": "one element of a resolved group",
+      "resolver_detail": "element 1 of _fb_pair"
+    },
+    {
+      "name": "transport",
+      "value": "0x400E8A70",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400e8a70"
+    },
+    {
+      "name": "call_sites",
+      "value": "[2 entries]",
+      "required": false,
+      "rule_type": "Xrefs",
+      "confidence": "unclassified",
+      "confidence_note": "",
+      "resolver_detail": "2 call site(s) to 0x400e8a70"
+    },
+    {
+      "name": "transport_start",
+      "value": "0x4006E8FE",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x4006e8fe"
+    },
+    {
+      "name": "transport_state",
+      "value": "0x4199DC2C",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "transport_start+4 = 0x4199dc2c, +0 -> 0x4199dc2c"
+    },
+    {
+      "name": "slc_status_predicate",
+      "value": "0x400E2592",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x400e2592"
+    },
+    {
+      "name": "slc_status_addr",
+      "value": "0x4BA9F478",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "slc_status_predicate+2 = 0x4ba9f478, +0 -> 0x4ba9f478"
+    },
+    {
+      "name": "ctx_switch",
+      "value": "0x40000410",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x40000410"
+    },
+    {
+      "name": "ctx_switch_load",
+      "value": "0x4000044A",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x4000044a"
+    },
+    {
+      "name": "current_tcb",
+      "value": "0x4399D798",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "ctx_switch+10 = 0x4399d798, +0 -> 0x4399d798"
+    },
+    {
+      "name": "prio_heads",
+      "value": "0x4399D758",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "task_create+28 = 0x4399d758, +0 -> 0x4399d758"
+    },
+    {
+      "name": "ready_cursor",
+      "value": "0x4060E3B0",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "ctx_switch+22 = 0x4060e3b0, +0 -> 0x4060e3b0"
+    },
+    {
+      "name": "intro_done",
+      "value": "0x4006CB92",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "fixed 0x4006cb92 (RTOS base, byte-identical across builds)"
+    },
+    {
+      "name": "frame_sem",
+      "value": "0x41988BE4",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "intro_done+4 = 0x41988bec, -8 -> 0x41988be4"
+    },
+    {
+      "name": "intro_pit3_isr",
+      "value": "0x4006C154",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "masked-signature match at 0x4006c154, selected by frame_sem at +20"
+    },
+    {
+      "name": "queue_recv",
+      "value": "0x40001C2A",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x40001c2a"
+    },
+    {
+      "name": "intro_park",
+      "value": "0x4006CBC0",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "fixed 0x4006cbc0 (RTOS base, byte-identical across builds)"
+    },
+    {
+      "name": "display_wait",
+      "value": "0x400E5E72",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x400e5e72"
+    },
+    {
+      "name": "display_frame_post",
+      "value": "0x400E5CFE",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400e5cfe"
+    },
+    {
+      "name": "display_sem",
+      "value": "0x421CD06C",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "display_frame_post+2 = 0x421cd06c, +0 -> 0x421cd06c"
+    },
+    {
+      "name": "pump_wait",
+      "value": "0x4008E1F4",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x4008e1f4"
+    },
+    {
+      "name": "sleep_pend",
+      "value": "0x400E8B02",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "pend_call+6"
+    },
+    {
+      "name": "tick_dispatch",
+      "value": "0x40002CFA",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x40002cfa"
+    },
+    {
+      "name": "tick_pend",
+      "value": "0x40002D24",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "tick_dispatch+42"
+    },
+    {
+      "name": "set_pixel",
+      "value": "0x400C0CF4",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x400c0cf4"
+    },
+    {
+      "name": "get_pixel",
+      "value": "0x400C0DC0",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x400c0dc0"
+    },
+    {
+      "name": "px_copy",
+      "value": null,
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "UNKNOWN",
+      "confidence_note": "did not resolve",
+      "resolver_detail": "0 match(es) for masked signature (32 bytes), need exactly 1",
+      "impact": "diagnostic only",
+      "impact_detail": "emu/longrun.py uses it for a counter, ev['pxcopy']; absent, that counter stays 0. This one appears GENUINELY ABSENT from mk1 rather than merely unfound: px_copy_to_bitmap(PixelData&, Bitmap&) is a Digitakt II routine, and mk1 carries no \"PixelData\" string, no match for its two-pointer prologue, and every function Ghidra reports as calling set_pixel is a drawing routine rather than a buffer copy. mk1 renders through panel_diff and the fb_front/fb_back pair instead."
+    },
+    {
+      "name": "sf_mulsf3",
+      "value": "0x401237CC",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x401237cc"
+    },
+    {
+      "name": "sf_subsf3",
+      "value": "0x401234E4",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x401234e4"
+    },
+    {
+      "name": "sf_addsf3",
+      "value": "0x401234EA",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x401234ea"
+    },
+    {
+      "name": "sf_divsf3",
+      "value": "0x4012390E",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x4012390e"
+    },
+    {
+      "name": "sf_abssf2",
+      "value": "0x401226FC",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x401226fc"
+    },
+    {
+      "name": "sf_fixsfsi",
+      "value": "0x40124C7E",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x40124c7e"
+    },
+    {
+      "name": "sf_cmpsf2",
+      "value": "0x40123B54",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x40123b54"
+    },
+    {
+      "name": "sd_bringup",
+      "value": "0x400E1F9E",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "fixed 0x400e1f9e (RTOS base, byte-identical across builds)"
+    },
+    {
+      "name": "sd_flag",
+      "value": "0x421CCA10",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "sd_bringup+28 = 0x421cca10, +0 -> 0x421cca10"
+    },
+    {
+      "name": "sd_status",
+      "value": "0x421CCA40",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "sd_flag+48"
+    },
+    {
+      "name": "sd_capacity",
+      "value": "0x421CCA34",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "sd_flag+36"
+    },
+    {
+      "name": "sd_cmd_sem",
+      "value": "0x421CCA5C",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "sd_flag+76"
+    },
+    {
+      "name": "sd_data_sem",
+      "value": "0x421CCA54",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "sd_flag+68"
+    },
+    {
+      "name": "sd_dma_sem",
+      "value": "0x421CCA4C",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "sd_flag+60"
+    },
+    {
+      "name": "uart8_init",
+      "value": "0x400026F2",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400026f2"
+    },
+    {
+      "name": "_uart8_globals",
+      "value": "0x4060E810",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "uart8_init+24 = 0x4060e810, +0 -> 0x4060e810"
+    },
+    {
+      "name": "uart8_tx_state",
+      "value": "0x4060E810",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "_uart8_globals+0"
+    },
+    {
+      "name": "uart8_ring_ptr",
+      "value": "0x4060E820",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "_uart8_globals+16"
+    },
+    {
+      "name": "uart8_consume_idx",
+      "value": "0x4060E840",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "_uart8_globals+48"
+    },
+    {
+      "name": "uart8_rx_callback",
+      "value": "0x4060E850",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "_uart8_globals+64"
+    },
+    {
+      "name": "uart8_tx_wait",
+      "value": "0x400024D0",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x400024d0"
+    },
+    {
+      "name": "_ssi0_dma_force_tail",
+      "value": "0x40076C70",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x40076c70"
+    },
+    {
+      "name": "ssi0_dma_force_rte",
+      "value": "0x40076C80",
+      "required": false,
+      "rule_type": "Offset",
+      "confidence": "derived",
+      "confidence_note": "a fixed offset from another symbol",
+      "resolver_detail": "_ssi0_dma_force_tail+16"
+    },
+    {
+      "name": "panel_button_names",
+      "value": "0x4018E254",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "char* table at 0x4018e254"
+    },
+    {
+      "name": "panel_encoder_names",
+      "value": "0x4018E2EC",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "char* table at 0x4018e2ec"
+    },
+    {
+      "name": "mainloop",
+      "value": "0x4000B6E4",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x4000b6e4"
+    },
+    {
+      "name": "main_queue",
+      "value": "0x4060FC28",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "mainloop+2 = 0x4060fc28, +0 -> 0x4060fc28"
+    },
+    {
+      "name": "job_pump",
+      "value": "0x4008E1C4",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x4008e1c4"
+    },
+    {
+      "name": "display_start",
+      "value": "0x400E5DB4",
+      "required": false,
+      "rule_type": "Sig",
+      "confidence": "measured",
+      "confidence_note": "unique masked byte-signature match in this image",
+      "resolver_detail": "unique masked-signature match at 0x400e5db4"
+    },
+    {
+      "name": "queue_send",
+      "value": "0x40001B7A",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x40001b7a"
+    },
+    {
+      "name": "ui_queue",
+      "value": "0x4060FC28",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "mainloop+2 = 0x4060fc28, +0 -> 0x4060fc28"
+    },
+    {
+      "name": "ui_key_dispatch",
+      "value": "0x4000B764",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x4000b764"
+    },
+    {
+      "name": "view_offer",
+      "value": "0x400CAB78",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400cab78"
+    },
+    {
+      "name": "view_activate",
+      "value": "0x400C9A9E",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400c9a9e"
+    },
+    {
+      "name": "view_close",
+      "value": "0x400C98B6",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400c98b6"
+    },
+    {
+      "name": "view_closed_mark",
+      "value": "0x400C98CE",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400c98ce"
+    },
+    {
+      "name": "view_request_pop",
+      "value": "0x400CA340",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400ca340"
+    },
+    {
+      "name": "view_sweep",
+      "value": "0x400CAA58",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400caa58"
+    },
+    {
+      "name": "ui_tick_inc",
+      "value": "0x400D3574",
+      "required": false,
+      "rule_type": "AnyOf",
+      "confidence": "mixed",
+      "confidence_note": "first sub-rule that resolved wins; see the detail column for which one",
+      "resolver_detail": "unique masked-signature match at 0x400d3574"
+    },
+    {
+      "name": "ui_tick_counter",
+      "value": "0x439C828C",
+      "required": false,
+      "rule_type": "Operand",
+      "confidence": "derived",
+      "confidence_note": "an integer read out of another symbol's instruction stream",
+      "resolver_detail": "ui_tick_inc+2 = 0x439c828c, +0 -> 0x439c828c"
+    },
+    {
+      "name": "idle_spins",
+      "value": "[16 entries]",
+      "required": false,
+      "rule_type": "ScanAll",
+      "confidence": "measured",
+      "confidence_note": "every match of a pattern in the image",
+      "resolver_detail": "16 occurrence(s)"
+    }
+  ]
+}
