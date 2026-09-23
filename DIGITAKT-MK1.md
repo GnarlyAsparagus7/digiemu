@@ -12,10 +12,10 @@ wsl -d Ubuntu -- bash -c "cd /root/digitakt/digikit && .venv/bin/python -m emu.d
 
 The window opens onto the running user interface **immediately** — it restores
 `snapshots/Digitakt_OS1.53/gui.snap`, a snapshot of the firmware already at
-its main screen. With the five-patch Unicorn it runs at 64M counted
+its main screen. With the patched Unicorn it runs at 64M counted
 instructions a second, in real time, with live audio (see Audio below);
-without the two speed patches, at roughly 8–11M, about half of real time,
-with audio rendered and played back afterwards.
+without the fast-memory and accelerator patches, at roughly 8–11M, about half
+of real time, with audio rendered and played back afterwards.
 
 Plain click = momentary press. **Shift-click latches**, so chords like
 `FUNC` + a trig are held together — the panel wire protocol is a per-channel
@@ -103,6 +103,8 @@ Run from `/root/digitakt/digikit` with `.venv/bin/python`.
 | `tools/menusweep.py` | press every code with a menu open and judge by page SET, not by one frame |
 | `tools/emucheck.py` | is this RUN trustworthy: one UI page, main loop advancing, +Drive mounted, no faked pend that had a real poster |
 | `tools/symaudit.py` | every symbol resolves, and `AnyOf` alternatives agree; `tests/test_symaudit.py` is the same checks |
+| `tools/livecheck.py` | live audio through the GUI's emulator thread with a stub sound card; `--pattern` records a pattern and checks every beat |
+| `tools/capbench.py` | how far faster than real time live audio can run (unpaced, the livecheck pattern); A/B in alternating runs |
 | `emu/tasks.py` | dump every TCB's parked PC and the ready list |
 | `/root/digitakt/shot.sh` | screenshot the GUI under Xvfb: `shot.sh <secs> <out.png> [snapshot]` |
 
@@ -612,8 +614,8 @@ sleeps rather than falls behind. The header has MUTE / PLAY / CLEAR /
 SAVE WAV and a status line (`AUDIO LIVE · N ms buffered · N dropouts`);
 `--no-audio` skips the model.
 
-This needs the two speed patches (`patches/README.md`). Without them the same
-run is about nine times slower (11.3 s for those 2 emulated seconds), and the
+This needs the fast-memory and accelerator patches (`patches/README.md`).
+Without them the same run is about nine times slower (11.3 s for those 2 emulated seconds), and the
 GUI falls back to the old mode: audio clock at `fallback_request_hz = 2000`,
 the render recorded and played back at 48 kHz afterwards, correct pitch,
 heard after the fact.
@@ -658,6 +660,61 @@ in progress. Nothing maps from a hook now; a transfer that needs a page is
 deferred to the next step boundary (the rules are in the `emu/edma_sw.py`
 docstring). The fast-memory patch likewise defers a TLB refill requested from
 inside a hook.
+
+**More headroom: the speed patch (09-23).** On a slow laptop live audio ran
+at 1.05-1.12x real time, too close to the edge. A sampling profiler inside
+the library (host PC, pattern playing) put 12% of the time in an
+exit-request check Unicorn compiles after every guest load and store, about
+a quarter in the three helper calls each EMAC MAC compiled to, and a few
+percent in re-translating a block for the exact PC at every hooked access;
+Python was about 30%. `unicorn-2.1.4-m68k-digikit-speed.patch` fuses each
+MAC into one helper and adds three engine options (`emu/native.py`): `rte`
+done natively, no per-access exit check (faulting stores still stop at the
+faulting instruction), and no PC rebuild for memory hooks (GUI only).
+Measured in alternating runs, pattern playing:
+
+| | five patches | six patches |
+|---|---|---|
+| WSL, deterministic replay, 4 emulated s | 1.72-1.97x | 2.69-2.83x |
+| Windows, `tools/capbench.py`, 10 s | 1.88-1.92x | 2.53-2.59x |
+
+The replay's audio and CPU state are byte-identical between the two
+libraries, and `tools/livecheck.py --pattern` passes (15 of 15 beats, no
+dropouts). The laptop was not re-measured; the Windows ratio (1.35x) puts it
+near 1.45x. `tools/capbench.py` is the capacity bench: the GUI's emulator
+thread with a stub sound card, the livecheck pattern programmed at real-time
+pace, then measured with pacing off. (Its first version pressed the keys
+unpaced, where a 0.15 s press lasts about 0.4 emulated seconds and DOWN
+auto-repeats onto an empty slot, so YES opened the file browser; it measured
+the snapshot's own pattern with the browser open. The ratio came out the
+same.)
+
+What is left, per the same profiler: the fused MAC helper about 20%,
+translated code about 20%, Python about 30% (SSI batching and timer register
+reads the largest parts).
+
+**More tracks cost almost nothing (09-23).** `tools/capbench.py --tracks 8`
+puts the sample on all eight tracks (TRK + trig selects one; `--screens`
+saved every step, and all eight read SAMP 1) and grid-records each. Windows,
+six-patch library, alternating runs: 2.46-2.56x with eight tracks playing
+against 2.68-2.69x with one, about 1% a track; in the WSL deterministic
+replay the gap is 0-6%, inside run-to-run noise. The reason is in a guest
+profile (block counts over half an emulated second of each replay): the
+firmware executes the same code, function for function within 0.5%, with
+one track or eight -- 169-170M instructions per emulated second, a fifth of
+them in `0x40072844` -- so it renders every voice every pass whether it
+plays or not. Python's calls are the same count for count, and the host
+profile has the same shape. The panel window itself costs about 3% (Tk under
+Xvfb in WSL, 2.56-2.64x against 2.66-2.73x headless).
+
+So splitting the voices across host threads, which would mean running the
+firmware's voice render natively, has little to win, and so does moving the
+emulator out of the GUI process. What bounds live audio is the fixed cost of
+the render pass, on one emulated CPU. The levers are per instruction: the MAC
+helper, the translated code, and the Python between steps (SSI and timers in
+native code). On the laptop the old headroom (5-12%) was small enough that a
+few percent more tipped it under real time; with the speed patch it should
+have about 35% left with all eight tracks playing (not measured there yet).
 
 **Patterns play (09-23).** The sequencer is clocked by the render through
 two software-forced interrupts that nothing modelled, so until now PLAY set

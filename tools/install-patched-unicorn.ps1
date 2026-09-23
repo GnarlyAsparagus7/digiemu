@@ -1,8 +1,8 @@
 # Windows twin of install-patched-unicorn.sh: build the m68k SR-read, code-hook
 # CCR-sync, EMAC MAC-with-load and EMAC fractional/signed-integer mode fixes,
-# the fast-memory path and the digikit accelerators (see patches/README.md)
-# from official Unicorn 2.1.4 with the MSVC toolchain, and drop unicorn.dll
-# into the project venv.
+# the fast-memory path, the digikit accelerators and speed options (see
+# patches/README.md) from official Unicorn 2.1.4 with the MSVC toolchain, and
+# drop unicorn.dll into the project venv.
 #
 #     powershell -ExecutionPolicy Bypass -File tools\install-patched-unicorn.ps1 [-DryRun] [-Source PATH]
 #
@@ -32,7 +32,9 @@ $patches = @(
   @{ Path = Join-Path $root 'patches\unicorn-2.1.4-m68k-fast-mem.patch'
      Sha  = '7f79332f318352cbd8055386dbf5149efc801d0663ae2450e33f9f39fed53374' },
   @{ Path = Join-Path $root 'patches\unicorn-2.1.4-m68k-digikit-accel.patch'
-     Sha  = '7048704a068cb074b93b751df4b1a73fd8972c1c0cc27e30774c4c2771ec2b5c' }
+     Sha  = '7048704a068cb074b93b751df4b1a73fd8972c1c0cc27e30774c4c2771ec2b5c' },
+  @{ Path = Join-Path $root 'patches\unicorn-2.1.4-m68k-digikit-speed.patch'
+     Sha  = '9560613223502656e82adc1ecc36d5d8486995bed13ea8ddad168f8c4558a799' }
 )
 $python = if ($env:PYTHON) { $env:PYTHON } else { Join-Path $root '.venv\Scripts\python.exe' }
 

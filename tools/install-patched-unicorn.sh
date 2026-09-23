@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the m68k SR-read, code-hook CCR-sync, EMAC MAC-with-load and EMAC
-# fractional/signed-integer mode fixes, the fast-memory path and the digikit
-# accelerators (see patches/README.md) from official Unicorn 2.1.4.
+# fractional/signed-integer mode fixes, the fast-memory path, the digikit
+# accelerators and speed options (see patches/README.md) from official
+# Unicorn 2.1.4.
 #
 # UNICORN_GIT=PATH clones from a local Unicorn repository instead of GitHub
 # (it must hold tag 2.1.4 at the pinned commit), so a rebuild needs no
@@ -17,6 +18,7 @@ patches=(
   "$root/patches/unicorn-2.1.4-m68k-emac-modes.patch"
   "$root/patches/unicorn-2.1.4-m68k-fast-mem.patch"
   "$root/patches/unicorn-2.1.4-m68k-digikit-accel.patch"
+  "$root/patches/unicorn-2.1.4-m68k-digikit-speed.patch"
 )
 patch_shas=(
   56de71acf2adbd5ca2f448095478e65e49fd79d378aeb5b5e4217d2c90f52f4e
@@ -24,6 +26,7 @@ patch_shas=(
   5fc44429ea913c5256c34a6e9c93ab90f727f120b4f12922a8f35a952fd1dace
   7f79332f318352cbd8055386dbf5149efc801d0663ae2450e33f9f39fed53374
   7048704a068cb074b93b751df4b1a73fd8972c1c0cc27e30774c4c2771ec2b5c
+  9560613223502656e82adc1ecc36d5d8486995bed13ea8ddad168f8c4558a799
 )
 source=${UNICORN_GIT:-https://github.com/unicorn-engine/unicorn.git}
 python=${PYTHON:-$root/.venv/bin/python}

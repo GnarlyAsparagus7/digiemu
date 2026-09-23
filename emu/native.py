@@ -12,6 +12,23 @@ microseconds:
     render starts and polls (emu/edma_sw.py is the Python original, still
     used for the rare transfer that needs a page mapped first).
 
+patches/unicorn-2.1.4-m68k-digikit-speed.patch adds engine options
+(uc_digikit_set_options), both off unless asked for:
+
+  * NATIVE_RTE: `rte` is done by QEMU's own ColdFire return instead of the
+    Python UC_HOOK_INTR in Machine.install_exceptions -- the same frame pop,
+    several thousand times a second without a crossing;
+  * NO_MEM_EXIT: no exit-request check after every guest load and store.
+    Those exist so a memory hook that stops emulation stops at that access;
+    none of this emulator's memory hooks stops emulation, and the check is a
+    helper call on every access (about a tenth of a live-audio run).
+  * NO_HOOK_PC_SYNC: memory read/write hooks see the PC as last synced
+    rather than an exact PC rebuilt (by re-translating the block) for every
+    hooked access. Only for callers whose memory hooks never read the PC --
+    the live-audio GUI turns it on (emu/gui.py).
+
+It also fuses each MAC into one helper call; that needs no option.
+
 Everything here degrades: on a Unicorn without the patch `available()` is
 False and callers keep their Python paths.
 """
@@ -64,6 +81,13 @@ _edma_install = _fn('uc_digikit_edma_install', ctypes.c_int,
                      ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(Edma)])
 _edma_size = _fn('uc_digikit_edma_size', ctypes.c_size_t, [])
 _hook_del = _fn('uc_hook_del', ctypes.c_int, [ctypes.c_void_p, ctypes.c_size_t])
+_options_supported = _fn('uc_digikit_options_supported', ctypes.c_uint32, [])
+_set_options = _fn('uc_digikit_set_options', ctypes.c_int,
+                   [ctypes.c_void_p, ctypes.c_uint32])
+
+NATIVE_RTE = 1
+NO_MEM_EXIT = 2
+NO_HOOK_PC_SYNC = 4
 
 
 def _handle(uc):
@@ -80,6 +104,27 @@ def edma_available(uc):
     return (_edma_install is not None and _handle(uc) is not None
             and _edma_size is not None
             and _edma_size() == ctypes.sizeof(Edma))
+
+
+def options_supported():
+    """-> the speed options (NATIVE_RTE | NO_MEM_EXIT) this library has."""
+    return _options_supported() if _options_supported is not None else 0
+
+
+def enable_options(uc, options):
+    """Turn on `options` on this engine, in addition to any already on.
+    -> the options now on (0 if the library has none). Unsupported bits are
+    ignored, so callers can ask for what they want and read back what they
+    got."""
+    handle = _handle(uc)
+    if handle is None or _set_options is None:
+        return 0
+    want = (getattr(uc, '_digikit_options', 0) | options) & options_supported()
+    err = _set_options(handle, want)
+    if err:
+        raise RuntimeError('uc_digikit_set_options failed: %d' % err)
+    uc._digikit_options = want
+    return want
 
 
 class NativeBudget:

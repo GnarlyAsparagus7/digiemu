@@ -68,7 +68,7 @@ from unicorn.m68k_const import UC_M68K_REG_A7, UC_M68K_REG_PC, UC_M68K_REG_SR
 from emu.longrun import build, spin
 from emu.dtim import Dtims, Timers
 from emu import (audioout, config, device as devices, edma_sw, intfrc,
-                 panel, panelin, panelleds, symbols)
+                 native, panel, panelin, panelleds, symbols)
 from emu.pit import INSTR_PER_SEC, Pits, intro_running
 from emu.screen import png
 
@@ -505,6 +505,11 @@ class Emulator(threading.Thread):
                 self._audio_sources = (ssi, edma_sw.install_bank(m, ev),
                                        intfrc.install(m, ev))
                 ssi.sink = self._audio_raw.extend
+                # None of the memory hooks on this path reads the PC, so the
+                # engine need not rebuild an exact one for every hooked access
+                # (emu/native.py). The PIT3 write probe below does read it.
+                if os.environ.get('DIGIKIT_PIT3_PROBE') != '1':
+                    native.enable_options(m.uc, native.NO_HOOK_PC_SYNC)
             else:
                 self.audio_live = False
             if self.patch_machine:

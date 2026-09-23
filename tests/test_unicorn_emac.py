@@ -202,6 +202,28 @@ INTEGER_CASES = (
     ("unsigned long with OMC", MAC_L, 0xC0, 0xFFFFFFFD, 1, 0xFFFFFFFD),
 )
 
+# With patches/unicorn-2.1.4-m68k-digikit-speed.patch every non-dual MAC is
+# one helper (mac_fused) that takes the mode, the MSAC bit and the scale
+# factor from the translator; these cover the bits the cases above do not.
+# Extension word bit 8 is MSAC, bits 10..9 the scale (RM 5.3.5): 01 is << 1,
+# which applies in integer modes only.
+MAC_L_SL1 = ["a907", "a1c1", "a805", "0a00", "a1c1"]   # mac.l D5,D4,<<1
+MSAC_L = ["a907", "a1c1", "a805", "0900", "a1c1"]      # msac.l D5,D4
+MSAC_L_SR1 = ["a907", "a1c1", "a805", "0f00", "a1c1"]  # msac.l D5,D4,>>1
+# (name, words, MACSR, D5, D4, expected D1)
+SCALE_AND_MSAC_CASES = (
+    ("signed << 1: 3 * 5", MAC_L_SL1, 0x00, 3, 5, 30),
+    ("unsigned << 1: 3 * 5", MAC_L_SL1, 0x40, 3, 5, 30),
+    ("fractional ignores the scale: 0.5 * 0.5", MAC_L_SL1, 0xA0,
+     0x40000000, 0x40000000, 0x20000000),
+    ("signed msac: 0 - 3 * 5", MSAC_L, 0x00, 3, 5, 0xFFFFFFF1),
+    ("signed msac >> 1: 0 - -6 * 1", MSAC_L_SR1, 0x00, 0xFFFFFFFA, 1, 3),
+    ("fractional msac: 0 - 0.5 * 0.5", MSAC_L, 0xA0, 0x40000000,
+     0x40000000, 0xE0000000),
+    ("signed msac with OMC saturates: 0 - -2^31 * 2", MSAC_L, 0x80,
+     0x80000000, 2, 0x7FFFFFFF),
+)
+
 
 def reg(name):
     return getattr(m68k_const, "UC_M68K_REG_" + name)
@@ -270,6 +292,12 @@ class UnicornEmacTest(unittest.TestCase):
 
     def test_integer_cases(self):
         for name, words, macsr, d5, d4, want in INTEGER_CASES:
+            with self.subTest(name):
+                uc, end = run(words, {"D7": macsr, "D5": d5, "D4": d4}, 4)
+                self.check(name, uc, end, {"D1": want})
+
+    def test_scale_and_msac_cases(self):
+        for name, words, macsr, d5, d4, want in SCALE_AND_MSAC_CASES:
             with self.subTest(name):
                 uc, end = run(words, {"D7": macsr, "D5": d5, "D4": d4}, 4)
                 self.check(name, uc, end, {"D1": want})

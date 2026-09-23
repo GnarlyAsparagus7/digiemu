@@ -1,6 +1,10 @@
 # Patched Unicorn requirement
 
-The emulator requires `unicorn==2.1.4` with two patches from `patches/`.
+The emulator requires `unicorn==2.1.4` with the patches in `patches/`: three
+correctness fixes it refuses to run without (the two below and the EMAC
+modes fix) and three speed patches it uses when present (fast memory, the
+digikit accelerators and speed options). `patches/README.md` describes
+all six.
 
 The m68k CCR patch, `unicorn-2.1.4-m68k-hook-ccr-sync.patch`: stock Unicorn
 both mutates lazy condition-code state when the host reads SR and leaves lazy

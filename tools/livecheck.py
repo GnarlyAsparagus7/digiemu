@@ -98,8 +98,10 @@ def main():
     ap.add_argument('--wav', help='save the recording here')
     args = ap.parse_args()
 
-    tmp = tempfile.mkdtemp(prefix='livecheck-')
-    card = os.path.join(tmp, 'card.img')
+    # One fixed copy, refreshed every run: the emulator maps the image, so a
+    # per-run copy cannot be deleted while this process lives and each run
+    # would leave 1 GB behind.
+    card = os.path.join(tempfile.gettempdir(), 'livecheck-card.img')
     shutil.copyfile(args.card, card)
     os.environ['DT2_PLUSDRIVE'] = card
     sys.path.insert(0, ROOT)
@@ -150,7 +152,6 @@ def main():
     pcm = emu.audio_take()
     emu.stop_flag.set()
     emu.join(15)
-    shutil.rmtree(tmp, ignore_errors=True)
     if args.wav:
         audioout.write_wav(args.wav, pcm)
     peak = max((abs(v) for v in struct.unpack(

@@ -1,6 +1,6 @@
 # Patches
 
-Five diffs against [Unicorn Engine](https://github.com/unicorn-engine/unicorn)
+Six diffs against [Unicorn Engine](https://github.com/unicorn-engine/unicorn)
 2.1.4, tag commit `8028ec436f2d9376525352dd38ed9ed6b9f6be10`, applied in this
 order, each against the tree with the ones before it applied:
 
@@ -15,13 +15,18 @@ order, each against the tree with the ones before it applied:
   `include/uc_priv.h` and `uc.c`.
 - `unicorn-2.1.4-m68k-digikit-accel.patch` touches
   `qemu/target/m68k/cpu.c` and appends to `uc.c`.
+- `unicorn-2.1.4-m68k-digikit-speed.patch` touches `include/uc_priv.h`,
+  `qemu/accel/tcg/cpu-exec.c` and `cputlb.c`, `qemu/target/m68k/helper.c`,
+  `helper.h` and `translate.c`, `qemu/tcg/tcg-op.c`, and appends to `uc.c`.
 
 The first three are correctness fixes, and the emulator refuses to run
-without them. The last two are speed: they are what make live audio on the
-mk1 run faster than real time. Without them the emulator takes the same code
-paths in Python, with byte-identical audio but about nine times slower: two
-emulated seconds of 48 kHz audio from the loaded-sample snapshot took 11.3 s
-of wall time instead of 1.26 s (WSL, 2026-09-23).
+without them. The last three are speed: they are what make live audio on the
+mk1 run faster than real time. Without fast-mem and accel the emulator takes
+the same code paths in Python, with byte-identical audio but about nine times
+slower: two emulated seconds of 48 kHz audio from the loaded-sample snapshot
+took 11.3 s of wall time instead of 1.26 s (WSL, 2026-09-23). The speed patch
+is optional in the same way: without it the audio and CPU state are the same
+byte for byte, at about two thirds of the speed.
 
 Everything except the `uc.c` additions is QEMU source vendored inside
 Unicorn. **The patches are
@@ -131,6 +136,42 @@ self-modifying code across and between translation blocks.
 `emu/native.py` probes for both exports and the emulator falls back to the
 Python paths when they are missing.
 
+## What the digikit speed patch changes
+
+A profile of the live-audio render (a sampling profiler inside the library,
+pattern playing) put 12% of the time in an exit-request check after every
+guest load and store, about a quarter in the three helper calls each MAC
+compiled to, and a few percent in re-translating a block to find the exact PC
+for every hooked memory access.
+
+- Every non-dual MAC and MSAC, with or without load, is one helper call
+  (`mac_fused`) instead of a multiply, a saturate and a flags helper, each of
+  which synced the TCG globals. The mode helpers' bodies are `static inline`
+  so the fused one inlines them; the exported helpers are one-line wrappers.
+  Always on.
+- `uc_digikit_set_options(uc, bits)` turns on three engine options, all off
+  by default (`uc_digikit_options_supported()` returns the bits the library
+  knows; an unknown bit is `UC_ERR_ARG`):
+  - `NATIVE_RTE` (1): `rte` runs QEMU's own ColdFire return instead of
+    surfacing as `UC_HOOK_INTR` 0x100 for the host to pop the frame. Other
+    exceptions still go to the hook. `emu/harness.py` turns it on after
+    installing its exception hook.
+  - `NO_MEM_EXIT` (2): no exit-request check after each load and store.
+    Those checks exist so a memory hook that calls `emu_stop` stops at that
+    access; with the option on, emulation stops at the next translation
+    block instead. Changing it flushes the translation cache. On for every
+    `Machine`: none of the emulator's memory hooks stops emulation.
+  - `NO_HOOK_PC_SYNC` (4): read and write hooks see the PC as last synced,
+    not the PC of the accessing instruction. Only for callers whose memory
+    hooks never read the PC; the live-audio GUI turns it on unless
+    `DIGIKIT_PIT3_PROBE=1`.
+
+`tests/test_unicorn_speed.py` checks each option against the behaviour
+without it, and the EMAC tests run through `mac_fused`. Over four emulated
+seconds of a playing pattern, audio and CPU state were byte-identical to the
+five-patch library at 2.76x to 2.83x real time instead of 1.82x to 1.97x
+(WSL, 2026-09-23).
+
 ## Checks
 
 `emu/unicorn_compat.py` exercises the CCR shapes, the `0x400db9e0`
@@ -138,12 +179,14 @@ instruction and fractional and signed-integer MACs, and refuses to run on an
 interpreter whose Unicorn lacks any of the patches, rather than letting a
 subtly wrong emulation pass for a working one. `tests/test_unicorn_emac.py`
 checks the MAC and MSAC load forms, fractional and integer modes and mode
-switches against the manual.
+switches against the manual. The speed options are not required, so the
+compat check does not test them; `tests/test_unicorn_speed.py` does.
 
 ## Applying them
 
 Do not apply these by hand. `tools/install-patched-unicorn.sh` (or its
-Windows twin, `tools/install-patched-unicorn.ps1`) pins the upstream commit, verifies each patch's SHA-256, builds only the m68k target,
+Windows twin, `tools/install-patched-unicorn.ps1`) pins the upstream
+commit, verifies each patch's SHA-256, builds only the m68k target,
 clones from a local repository instead of GitHub when given one
 (`UNICORN_GIT=PATH` / `-Source PATH`),
 replaces the dynamic library the Python bindings actually load, and then runs

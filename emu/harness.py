@@ -105,6 +105,11 @@ class Machine:
         # Same calls, less binding overhead per call; see emu/fastuc.py.
         from emu import fastuc
         fastuc.install(self.uc)
+        # No exit check after every guest load and store: none of this
+        # emulator's memory hooks stops emulation, and the check is a helper
+        # call per access (emu/native.py). A no-op on a library without it.
+        from emu import native
+        native.enable_options(self.uc, native.NO_MEM_EXIT)
         self.mapped = set()
         # An unmodeled peripheral page is invisible once auto-mapped: reads
         # return 0 and writes vanish, so the firmware looking for hardware
@@ -379,6 +384,7 @@ class Machine:
         """Dispatch exceptions via the vector table and implement `rte`."""
         def on_intr(uc, vec, data):
             if vec == EXCP_RTE:
+                # Only reached on a Unicorn without native rte (see below).
                 sp = uc.reg_read(UC_M68K_REG_A7)
                 _fmt, sr, pc = struct.unpack('>HHI', uc.mem_read(sp, 8))
                 uc.reg_write(UC_M68K_REG_SR, sr)
@@ -394,6 +400,13 @@ class Machine:
                 self.halt_vec = vec
                 uc.emu_stop()
         self.uc.hook_add(UC_HOOK_INTR, on_intr)
+        # Let the engine do `rte` itself where it can: QEMU's ColdFire return
+        # pops the same frame (format/SR, PC) and adds 8 to A7, as the branch
+        # above does, without a Python call per return. ColdFire here has one
+        # stack pointer (CACR.EUSP is never set: MOVEC is intercepted), so the
+        # order of the SR and A7 writes cannot matter.
+        from emu import native
+        native.enable_options(self.uc, native.NATIVE_RTE)
 
     def _ensure_frame(self, sp, size):
         """Map the pages an exception frame is about to be pushed onto.
