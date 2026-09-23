@@ -40,6 +40,16 @@ def frames_from_ssi(data, word_bits=32, sample_bits=24):
     """
     step = word_bits // 8
     count = len(data) // step
+    if word_bits == 32 and sample_bits == 24:
+        # The live-audio case, a few thousand times a second. Bits 23..8 of
+        # a big-endian word are its bytes 1 and 2, and taken as a signed
+        # 16-bit value they are exactly the 24-bit sample shifted right by 8
+        # (the sign bit is among them). So: those two bytes, little-endian.
+        data = bytes(data[:count * 4])
+        out = bytearray(2 * count)
+        out[0::2] = data[2::4]
+        out[1::2] = data[1::4]
+        return bytes(out)
     words = struct.unpack('>%d%s' % (count, 'I' if step == 4 else 'H'),
                           data[:count * step])
     shift = sample_bits - 16

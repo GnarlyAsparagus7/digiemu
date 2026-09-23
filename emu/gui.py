@@ -882,6 +882,11 @@ class Emulator(threading.Thread):
             data = bytes(buf)
             del buf[:]
             st.feed(data)
+        elif st is getattr(self, '_leds_from', None):
+            # Nothing new since the colours were last read: they only
+            # change on feed, and working them out is not free.
+            return
+        self._leds_from = st
         now = st.colours()
         if now != self.leds:
             self.leds = now

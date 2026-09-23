@@ -159,9 +159,26 @@ class Ssi0Dma:
         if at is not None and force_rte is not None:
             at(force_rte, self._on_force_rte)
 
+    # The period and the current deadline are cached: `step` and `service`
+    # run on every step of the live-audio GUI, several thousand a second,
+    # and rebuilding the same Fractions each time was a measurable part of
+    # its wall time. The values are exactly those computed before.
+    @property
+    def ips(self):
+        return self._ips
+
+    @ips.setter
+    def ips(self, v):
+        self._ips = v
+        self._period = None
+
     @property
     def period(self):
-        return Fraction(self.ips, self.request_hz)
+        p = self.__dict__.get('_period')
+        if p is None:
+            p = self._period = Fraction(self.ips, self.request_hz)
+            self._period_ceil = max(1, math.ceil(p))
+        return p
 
     def align(self, now):
         """Start a fresh SSI clock at an explicit legacy-upgrade boundary."""
@@ -271,7 +288,21 @@ class Ssi0Dma:
     def _deadline(self):
         if self._due is None:
             self._due = self._frames_to_event()
-        return self.next + self.period * (self._due - 1)
+        period = self.period
+        key = self.__dict__.get('_dl_key')
+        if key is not None and key[0] is self.next and key[1] == self._due \
+                and key[2] is period:
+            return self._dl
+        self._dl = self.next + period * (self._due - 1)
+        self._dl_ceil = math.ceil(self._dl)
+        self._dl_key = (self.next, self._due, period)
+        return self._dl
+
+    def _deadline_ceil(self):
+        """-> ceil(_deadline()): for an integer `done`, `done >= deadline`
+        and `ceil(deadline - done)` are both exact against it."""
+        self._deadline()
+        return self._dl_ceil
 
     def step(self, done, remaining=None):
         self.now = int(done)
@@ -279,7 +310,10 @@ class Ssi0Dma:
             return remaining
         if self.next is None:
             self.next = Fraction(done) + self.period
-        step = max(1, math.ceil(self._deadline() - done))
+        if type(done) is int:
+            step = max(1, self._deadline_ceil() - done)
+        else:
+            step = max(1, math.ceil(self._deadline() - done))
         if self.batch and ((self.int50_asserted and not self.int50_delivered)
                            or (self.force_asserted
                                and not self.force_delivered)):
@@ -287,12 +321,19 @@ class Ssi0Dma:
             # step boundary. Unbatched that is a frame away; batched it could
             # be a whole half-buffer, which makes the render late and sends
             # one half twice (measured). Keep retries a frame apart.
-            step = min(step, max(1, math.ceil(self.period)))
+            self.period
+            step = min(step, self._period_ceil)
         return min(step, remaining) if remaining is not None else step
 
     def service(self, done):
         self.now = int(done)
-        if self.next is not None and done >= self._deadline():
+        if self.next is None:
+            due = False
+        elif type(done) is int:
+            due = done >= self._deadline_ceil()
+        else:
+            due = done >= self._deadline()
+        if due:
             n = self._due
             self.requests += n
             self._run_minors(self.p.rx_chan, False, n)
@@ -347,9 +388,13 @@ class Ssi0Dma:
                     self.rx_bytes += len(supplied)
             dest = (dest + total) & 0xFFFFFFFF
         citer -= n
-        self._w32(channel, SADDR, source)
-        self._w32(channel, DADDR, dest)
-        self._w16(channel, CITER, citer)
+        # SADDR, DADDR and CITER in one write of the descriptor just read
+        # (nothing runs in between to change the rest of it).
+        new = bytearray(raw)
+        struct.pack_into('>I', new, SADDR, source & 0xFFFFFFFF)
+        struct.pack_into('>I', new, DADDR, dest & 0xFFFFFFFF)
+        struct.pack_into('>H', new, CITER, citer & 0xFFFF)
+        self.m.uc.mem_write(tcd, bytes(new))
         if captured:
             self.tx_bytes += len(captured)
             self.tx_crc32 = zlib.crc32(captured, self.tx_crc32)
@@ -483,6 +528,14 @@ class Ssi0Dma:
         if self.m.raise_vector(self.p.tx_vector, level=level):
             self.int50_delivered = True
             self.vector170 += 1
+            # The transmit ISR runs above the render's level and ends in the
+            # hooked rte, where the render is taken without the IPL dropping
+            # below its level. So the render window opens here: what waits at
+            # or below the render's level waits until the render returns (or,
+            # if this pass forces no render, until this ISR's rte).
+            render = interrupt_level(self.m, FORCE_VECTOR, respect_mask=False)
+            if render is not None and render <= level:
+                self._render_started(render)
             return True
         return False
 
@@ -512,6 +565,7 @@ class Ssi0Dma:
 
     def _on_force_rte(self, uc, address, size, user_data):
         if not self.force_asserted or self.force_delivered:
+            self._render_returned()
             return
         # INTFRCH requests explicitly bypass the INTC mask registers. At this
         # hook the channel-50 ISR is about to restore the interrupted SR; take
@@ -527,6 +581,38 @@ class Ssi0Dma:
         ):
             self.force_delivered = True
             self.vector191 += 1
+            self._render_started(level)
+
+    # The render window. Vector 191 is the audio render: it runs for most of
+    # each pass at its own level, and every interrupt that falls due meanwhile
+    # at that level or below waits for it -- measured under live audio with a
+    # pattern playing, not one such interrupt was taken inside the window.
+    # So while it runs, the waiting sources need not re-check the mask every
+    # PENDING_STEP (see emu.pit.render_holds): this hook ends the step as the
+    # render returns, right before the rte that drops the IPL, and they are
+    # served then. Fast stepping only: a counted run has no step to end, so
+    # the window is never opened there and nothing changes.
+    def _render_started(self, level):
+        m = self.m
+        if getattr(m, '_fast_stepper_obj', None) is None:
+            return
+        if getattr(m, 'render_ipl', None) is None:
+            # A new window. One already open (the transmit ISR's, now
+            # handing over to the render) keeps its waiters.
+            m.render_since = self.now
+            m.render_waiting = False
+        m.render_ipl = level
+
+    def _render_returned(self):
+        m = self.m
+        if getattr(m, 'render_ipl', None) is None:
+            return
+        m.render_ipl = None
+        if m.render_waiting:
+            m.render_waiting = False
+            stepper = getattr(m, '_fast_stepper_obj', None)
+            if stepper is not None:
+                stepper.left = 0
 
     def _deliver_vector191(self):
         """Retry a software-forced source that the interrupted IPL blocked."""

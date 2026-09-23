@@ -9,6 +9,7 @@ hooks dspboot.run installs (flash HLE, completion-semaphore patch, ISA patches,
 MMIO, exceptions) and restores a snapshot onto it. Resuming onto a bare Machine
 instead silently drops those hooks and the run diverges -- see snapshot.py.
 """
+import math
 import struct
 import sys
 import os
@@ -870,7 +871,11 @@ class _FastStepper:
         """Execute about `step` instructions from `pc`. -> instructions run."""
         self.steps += 1
         self.blocks = 0
-        self.left = max(1, int(step / self.per_block))
+        # Round the block budget up. Rounded down, a full step reports a
+        # count a few instructions short of `step`, so the deadline it was
+        # aimed at is not yet due and `spin` runs a second, one-block step
+        # to cross it: two emu_start calls per deadline, the same blocks.
+        self.left = max(1, math.ceil(step / self.per_block))
         self.m.uc.emu_start(pc, 0)
         return max(1, int(self.blocks * self.per_block))
 

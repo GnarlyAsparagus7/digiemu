@@ -38,7 +38,7 @@ import collections
 from unicorn import UC_HOOK_MEM_WRITE
 from unicorn.m68k_const import UC_M68K_REG_SR
 
-from emu.pit import PENDING_STEP, interrupt_level
+from emu.pit import PENDING_STEP, interrupt_level, render_holds
 
 INTC0, FIRST_VECTOR = 0xFC048000, 64
 INTFRCH, INTFRCL = 0x10, 0x14
@@ -81,6 +81,12 @@ class ForcedInterrupts:
         waiting = self.asserted - self.delivered
         if not waiting:
             return None
+        # Waiting out the audio render (source 57 behind it, typically):
+        # its rte ends the step, so there is nothing to poll for.
+        if all(render_holds(self.m, done, interrupt_level(
+                self.m, self.first_vector + src, respect_mask=False))
+               for src in waiting):
+            return remaining
         return min(PENDING_STEP, remaining) if remaining is not None \
             else PENDING_STEP
 

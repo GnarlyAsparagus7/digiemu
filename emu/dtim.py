@@ -64,7 +64,8 @@ from unicorn import UC_HOOK_MEM_WRITE
 from unicorn.m68k_const import UC_M68K_REG_SR
 
 from emu.pit import (F_BUS, ICR_BASE, IDLE_STEP, IMR_BASE, INSTR_PER_SEC,
-                     INTC, PENDING_STEP)
+                     INTC, PENDING_STEP, _nothing_due, mem_reader,
+                     render_holds)
 
 BASES   = (0xFC070000, 0xFC074000, 0xFC078000, 0xFC07C000)
 VECTORS = (96, 97, 98, 99)              # INTC0 sources 32..35
@@ -203,10 +204,22 @@ class Dtims:
         self.pending = set(state.get('pending', ()))
 
     def period(self, ch):
-        """-> instructions between interrupts, or None if it cannot fire."""
-        dtmr = struct.unpack('>H', self.m.uc.mem_read(BASES[ch] + DTMR, 2))[0]
-        dtxmr = self.m.uc.mem_read(BASES[ch] + DTXMR, 1)[0]
-        dtrr = struct.unpack('>I', self.m.uc.mem_read(BASES[ch] + DTRR, 4))[0]
+        """-> instructions between interrupts, or None if it cannot fire.
+
+        DTMR..DTRR are read every call, in one read; the arithmetic is
+        remembered, keyed on those bytes and the rate (as `Pits.period`).
+        """
+        raw = mem_reader(self.m)(BASES[ch] + DTMR, 8)
+        cache = self.__dict__.setdefault('_period_cache', {})
+        hit = cache.get(ch)
+        if hit is not None and hit[0] == raw and hit[1] == self.ips:
+            return hit[2]
+        p = self._period_from(raw)
+        cache[ch] = (raw, self.ips, p)
+        return p
+
+    def _period_from(self, raw):
+        dtmr, dtxmr, _dter, dtrr = struct.unpack('>HBBI', raw)
         if not (dtmr & RST) or not (dtmr & ORRI) or (dtxmr & DMAEN):
             return None
         clk = (dtmr >> 1) & 0x03
@@ -230,10 +243,11 @@ class Dtims:
                 break
         else:
             return None
-        icr = self.m.uc.mem_read(base + ICR_BASE + src, 1)[0] & 0x07
+        read = mem_reader(self.m)
+        icr = read(base + ICR_BASE + src, 1)[0] & 0x07
         if not icr:
             return None
-        imrh, imrl = struct.unpack('>II', self.m.uc.mem_read(base + IMR_BASE, 8))
+        imrh, imrl = struct.unpack('>II', read(base + IMR_BASE, 8))
         masked = (imrl >> src) & 1 if src < 32 else (imrh >> (src - 32)) & 1
         return None if masked else icr
 
@@ -275,7 +289,9 @@ class Dtims:
             n = remaining
         if self.arm:
             n = min(n, ARM_STEP)
-        if self.pending:
+        if self.pending and not all(
+                render_holds(self.m, done, self.level(VECTORS[ch]))
+                for ch in self.pending):
             n = min(n, PENDING_STEP)
         if remaining is not None:
             n = min(n, remaining)
@@ -284,6 +300,8 @@ class Dtims:
     def service(self, done):
         """Call at a chunk boundary with the instruction count so far."""
         if self.held:
+            return
+        if _nothing_due(self, done):
             return
         for ch in self.channels:
             p = self.period(ch)

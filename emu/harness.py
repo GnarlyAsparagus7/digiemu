@@ -102,6 +102,9 @@ class Machine:
         require_compatible_unicorn()
         self.uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
         self.uc.ctl_set_cpu_model(cpu)
+        # Same calls, less binding overhead per call; see emu/fastuc.py.
+        from emu import fastuc
+        fastuc.install(self.uc)
         self.mapped = set()
         # An unmodeled peripheral page is invisible once auto-mapped: reads
         # return 0 and writes vanish, so the firmware looking for hardware

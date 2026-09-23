@@ -39,6 +39,9 @@ import tkinter as tk
 from emu import audioout, config
 from emu.gui import ON, OFF, Emulator, H, W
 
+# RGB for each framebuffer byte value: zero is off, anything else on.
+_PIXEL = [ON if v else OFF for v in range(256)]
+
 SCALE = 4
 BG, FACE, EDGE = '#0b0d10', '#1c2027', '#2c323b'
 TEXT, DIM, AMBER = '#c9d3e0', '#6b7789', '#ffb638'
@@ -350,7 +353,15 @@ class DigitaktPanel(tk.Tk):
                                   text='UNMUTE' if emu.audio_muted else 'MUTE')
 
     def draw_screen(self, fb):
-        body = b''.join(ON if v else OFF for v in fb)
+        # Unchanged since the last refresh: nothing to do. Building the image
+        # is a Python loop over every pixel, run on this thread while the
+        # emulator thread waits for the interpreter lock, so skipping it on a
+        # still screen buys emulation time.
+        frame = bytes(fb)
+        if frame == getattr(self, '_last_frame', None):
+            return
+        self._last_frame = frame
+        body = b''.join(map(_PIXEL.__getitem__, frame))
         self.screen.put(b'P6\n%d %d\n255\n' % (W, H) + body, to=(0, 0, W, H))
         # copy -zoom writes into the existing image; PhotoImage.zoom would
         # allocate a new one on every refresh.

@@ -119,6 +119,86 @@ PENDING_STEP = 2048
 
 PIT3_VECTOR_SLOT = 0x40000340     # VBR + 208*4, not build-specific
 
+def _nothing_due(timers, done):
+    """-> True when a `service(done)` on `timers` (Pits or Dtims) could only
+    re-check whether channels were switched on or off: every channel is
+    armed, none is due and no tick is waiting. `spin` calls `step` at the
+    same count straight after `service`, and `step` makes that same check
+    with the same result, so the service can skip reading the registers.
+    A channel not yet armed still takes the full path, so `service` alone
+    arms a clock exactly as before."""
+    if timers.pending:
+        return False
+    nxt = timers.next
+    for ch in timers.channels:
+        n = nxt[ch]
+        if n is None or done >= n:
+            return False
+    return True
+
+
+# A render window older than this many instructions is not trusted to end
+# the step itself (a snapshot resumed mid-render, say): polling resumes.
+# A render pass is about 26k counted instructions.
+RENDER_MAX = 200_000
+
+
+def render_holds(m, done, level):
+    """-> True if a tick at `level` waiting now can be left to the audio
+    render's end instead of re-checked every PENDING_STEP.
+
+    True only while emu/ssi.py has a render window open whose level is at
+    least `level`: the render holds the IPL there until its rte, and the
+    SSI's hook on that rte ends the step, so the tick is offered at the first
+    boundary after the mask drops -- sooner than a poll would. Saying True
+    also asks the hook to end that step. See Ssi0Dma._render_started.
+    """
+    ipl = getattr(m, 'render_ipl', None)
+    if ipl is None or level is None or level > ipl:
+        return False
+    if done - m.render_since > RENDER_MAX:
+        return False
+    m.render_waiting = True
+    return True
+
+
+def mem_reader(m):
+    """-> read(addr, size) -> bytes, for a machine's engine.
+
+    The timer models read their registers on every step, several thousand
+    times a second under live audio, and Unicorn's `mem_read` allocates a
+    fresh ctypes buffer and a bytearray on each call. This one calls
+    `uc_mem_read` directly into a buffer reused per size. Same bytes, same
+    errors. Cached on the machine; only the emulator thread may use it.
+    """
+    read = getattr(m, '_fast_mem_read', None)
+    if read is not None:
+        return read
+    uc = m.uc
+    try:
+        import ctypes
+        from unicorn import UcError
+        from unicorn.unicorn_py3.unicorn import uclib
+        fn, handle = uclib.uc_mem_read, uc._uch
+        bufs = {}
+
+        def read(addr, size):
+            buf = bufs.get(size)
+            if buf is None:
+                buf = bufs[size] = ctypes.create_string_buffer(size)
+            status = fn(handle, addr, buf, size)
+            if status:
+                raise UcError(status, addr, size)
+            return buf.raw
+    except Exception:                                  # noqa: BLE001
+        def read(addr, size):
+            return bytes(uc.mem_read(addr, size))
+    try:
+        m._fast_mem_read = read
+    except AttributeError:
+        pass
+    return read
+
 
 def interrupt_level(m, vec, respect_mask=True):
     """Return a vector's programmed level, or None if disabled/masked."""
@@ -128,12 +208,13 @@ def interrupt_level(m, vec, respect_mask=True):
             break
     else:
         return None
-    icr = m.uc.mem_read(base + ICR_BASE + src, 1)[0] & 0x07
+    read = mem_reader(m)
+    icr = read(base + ICR_BASE + src, 1)[0] & 0x07
     if not icr:
         return None
     if not respect_mask:
         return icr
-    imrh, imrl = struct.unpack('>II', m.uc.mem_read(base + IMR_BASE, 8))
+    imrh, imrl = struct.unpack('>II', read(base + IMR_BASE, 8))
     masked = (imrl >> src) & 1 if src < 32 else (imrh >> (src - 32)) & 1
     return None if masked else icr
 
@@ -244,12 +325,24 @@ class Pits:
         self.pending = set(state.get('pending', ()))
 
     def period(self, ch):
-        """-> instructions between interrupts, or None while the timer is off."""
-        pcsr, pmr = struct.unpack('>HH', self.m.uc.mem_read(BASES[ch], 4))
+        """-> instructions between interrupts, or None while the timer is off.
+
+        The registers are read every call, as they always were; only the
+        arithmetic is remembered, keyed on the bytes read and the rate.
+        """
+        raw = mem_reader(self.m)(BASES[ch], 4)
+        cache = self.__dict__.setdefault('_period_cache', {})
+        hit = cache.get(ch)
+        if hit is not None and hit[0] == raw and hit[1] == self.ips:
+            return hit[2]
+        pcsr, pmr = struct.unpack('>HH', raw)
         if not (pcsr & EN) or not (pcsr & PIE):
-            return None
-        prescale = 1 << (((pcsr >> 8) & 0xF) + 1)
-        return prescale * (pmr + 1) / F_BUS * self.ips
+            p = None
+        else:
+            prescale = 1 << (((pcsr >> 8) & 0xF) + 1)
+            p = prescale * (pmr + 1) / F_BUS * self.ips
+        cache[ch] = (raw, self.ips, p)
+        return p
 
     def level(self, vec):
         """-> the source's interrupt level, or None if masked or disabled.
@@ -308,7 +401,9 @@ class Pits:
             raise RuntimeError('invalid PIT deadline') from exc
         if d is None and remaining is not None:
             n = remaining
-        if self.pending:
+        if self.pending and not all(
+                render_holds(self.m, done, self.level(VECTORS[ch]))
+                for ch in self.pending):
             n = min(n, PENDING_STEP)
         if remaining is not None:
             n = min(n, remaining)
@@ -325,6 +420,8 @@ class Pits:
         the same level until its `rte`. See the class docstring on PIT3.
         """
         if self.held:
+            return
+        if _nothing_due(self, done):
             return
         for ch in self.channels:
             p = self.period(ch)
