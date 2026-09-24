@@ -147,7 +147,7 @@ def build_flash(syx_path, size=0x1000000):
 def run(syx_path, main_img, limit=120_000_000, tick_vec=32, tick_every=20000,
         patch_sem=True, patch_depack=True, verbose=False, stall_window=3_000_000,
         extra_hook=None, fast=True, resume_from=None, machine_out=None,
-        pre_start=None, sdgate=True, esdhc=True):
+        pre_start=None, sdgate=True, esdhc=True, coverage=True):
     """resume_from: path to a snapshot (see emu/snapshot.py). Loads registers
     and memory instead of starting at ENTRY, but installs the *same* hooks, so
     a resumed run behaves identically to the equivalent straight run. Without
@@ -167,7 +167,16 @@ def run(syx_path, main_img, limit=120_000_000, tick_vec=32, tick_every=20000,
     Pass sdgate=False and/or esdhc=False for the old unmodelled-storage
     behaviour.
     machine_out: if given, receives 'm' (the Machine) and 'st' (the stats
-    dict) before emu_start is called, so a pre_start hook can see both."""
+    dict) before emu_start is called, so a pre_start hook can see both.
+    coverage=False (fast path only) leaves out the global per-instruction
+    hook that counts instructions and records coverage: st['n'], 'seen',
+    'curve' and 'stall_pcs' then stay empty and extra_hook is never called.
+    That hook is a Python call on every guest instruction; without it the
+    cold boot runs about ten times faster. Nothing else depends on it.
+    limit=None sets the machine up and returns without running it (stop
+    'not started'); machine_out also receives 'start_pc' then, so the caller
+    can drive emu_start itself (emu.bootstrap.cold_boot does, under a native
+    block budget)."""
     """fast=True (default): FF1/MOVEC and every HOT_ADDRS side effect are
     registered as per-address Unicorn hooks (begin=end=addr) instead of one
     global UC_HOOK_CODE that runs Python on every instruction and then
@@ -279,7 +288,8 @@ def run(syx_path, main_img, limit=120_000_000, tick_vec=32, tick_every=20000,
                 st['curve'].append((st['n'] // 1_000_000, len(st['seen'])))
             if extra_hook:
                 extra_hook(uc, addr, size, st)
-        m.uc.hook_add(UC_HOOK_CODE, cover)
+        if coverage:
+            m.uc.hook_add(UC_HOOK_CODE, cover)
         m.install_isa_patches_scoped(main_img, MAIN_LOAD)
 
         def scoped(addr, fn):
@@ -389,8 +399,13 @@ def run(syx_path, main_img, limit=120_000_000, tick_vec=32, tick_every=20000,
         # pre_start hook timestamp itself against it while the run is in
         # progress, not just after emu_start returns.
         machine_out['st'] = st
+        machine_out['start_pc'] = start_pc
     if pre_start:                 # add extra Unicorn hooks before execution starts
         pre_start(m)
+    if limit is None:
+        # count=0 would mean "no limit" to Unicorn, so there is no way to
+        # ask emu_start for nothing: set up only, the caller runs it.
+        return m, st, 'not started'
     try:
         m.uc.emu_start(start_pc, 0, count=limit)
         stop = 'instruction limit'

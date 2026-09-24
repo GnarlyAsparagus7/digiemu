@@ -17,6 +17,7 @@ from unicorn.m68k_const import UC_M68K_REG_PC
 import emu.dspboot as db
 import emu.longrun as lr
 from emu import config
+from emu.bootstrap import replace_retry
 from emu.snapshot import save
 
 
@@ -52,8 +53,14 @@ def save_longrun(machine, ev, timers, path, extra=None):
     )
 
 
+# dspboot.run's stop reason for a cold boot that used its whole budget. Any
+# other reason is an emulator error string, and the ladder stopped early.
+LIMIT_STOP = "instruction limit"
+
+
 def make(points, prefix="snapshots/boot", syx=None, img_path=None,
-         sdgate=True, esdhc=True):
+         sdgate=True, esdhc=True, progress=None, report_every=5_000_000,
+         out=None):
     """Save a LADDER of checkpoints in one pass.
 
     `points` is a list of instruction counts. Saving mid-run is safe because
@@ -77,6 +84,29 @@ def make(points, prefix="snapshots/boot", syx=None, img_path=None,
     reaches MAIN_OS_RUNNING both with and without them, so turning them on
     does not regress the previously-working build. Pass sdgate=False and/or
     esdhc=False to get the old unmodelled-storage behaviour back.
+
+    The prefix's directory is created first. The first rung is saved from
+    inside the run at ~60M instructions, so a missing directory used to cost
+    half a minute and then a FileNotFoundError. Each rung is written to
+    `<rung>.tmp` and renamed into place, so a killed run never leaves a
+    truncated rung that looks like a finished one. The renames retry while
+    Windows refuses them because another process has the target open
+    (emu.bootstrap.replace_retry).
+
+    `progress`: None prints one line per rung, as this always has. Otherwise
+    nothing is printed and it is called as ``progress(n, total, rung)``:
+    every `report_every` instructions with rung=None, and once after each
+    rung is saved with rung = {'at', 'path', 'addrs', 'tasks', 'pc', 'bytes',
+    'text'} ('text' is the line that would have been printed). It may raise
+    -- to cancel, say: Unicorn stops the run and the exception comes out of
+    this call, with no sidecar written.
+
+    `out`, a dict, receives 'm' (the Machine), 'st', 'saved' and 'stop' --
+    dspboot.run's stop reason, LIMIT_STOP when the boot used its whole
+    budget. A run that stopped early otherwise looks just like a finished
+    one, because dspboot turns the emulator error into that string and
+    returns normally. The sidecar (.ladder.json) is written only when every
+    rung was saved.
     """
     syx = config.firmware(syx)
     image_path = config.main_image(img_path)
@@ -87,21 +117,42 @@ def make(points, prefix="snapshots/boot", syx=None, img_path=None,
         raise RuntimeError("cannot read MAIN OS image %r" % image_path) from exc
     points = sorted(points)
     todo = list(points)
-    box = {"m": None, "saved": []}
+    box = out if out is not None else {}
+    box.update({"m": None, "saved": [], "stop": None})
+    limit = points[-1] + 1_000_000
+    os.makedirs(os.path.dirname(prefix) or ".", exist_ok=True)
+    # This hook runs on every instruction of the cold boot, so the common
+    # case is one comparison against whichever comes first, the next rung or
+    # the next progress report.
+    never = 1 << 62
+    next_report = report_every if progress is not None else never
+    gate = min(next_report, todo[0])
 
     def hook(uc, addr, size, st):
-        if todo and st["n"] >= todo[0]:
-            at = todo.pop(0)
+        nonlocal next_report, gate
+        if st["n"] < gate:
+            return
+        rung = todo and st["n"] >= todo[0]
+        report = st["n"] >= next_report
+        if report:
+            next_report += report_every
+        at = todo.pop(0) if rung else None
+        gate = min(next_report, todo[0] if todo else never)
+        if report:
+            progress(st["n"], limit, None)
+        if rung:
             path = "%s%dM.snap" % (prefix, at // 1_000_000)
             info = save(
                 box["m"],
-                path,
+                path + ".tmp",
                 extra={
                     "n": st["n"],
                     "seen": sorted(st["seen"]),
                     "tasks": {hex(k): v for k, v in st["task_create_hits"].items()},
                 },
             )
+            replace_retry(path + ".tmp", path)
+            pc = uc.reg_read(UC_M68K_REG_PC)
             box["saved"].append(
                 (
                     at,
@@ -109,26 +160,30 @@ def make(points, prefix="snapshots/boot", syx=None, img_path=None,
                     info,
                     len(st["seen"]),
                     len(st["task_create_hits"]),
-                    uc.reg_read(UC_M68K_REG_PC),
+                    pc,
                 )
             )
-            print(
-                "  [%dM] %s  %d addrs, %d tasks, pc=0x%08x, %d B"
-                % (
-                    at // 1_000_000,
-                    path,
-                    len(st["seen"]),
-                    len(st["task_create_hits"]),
-                    uc.reg_read(UC_M68K_REG_PC),
-                    info["bytes_on_disk"],
-                ),
-                flush=True,
+            text = "  [%dM] %s  %d addrs, %d tasks, pc=0x%08x, %d B" % (
+                at // 1_000_000,
+                path,
+                len(st["seen"]),
+                len(st["task_create_hits"]),
+                pc,
+                info["bytes_on_disk"],
             )
+            if progress is None:
+                print(text, flush=True)
+            else:
+                progress(st["n"], limit, {
+                    "at": at, "path": path, "addrs": len(st["seen"]),
+                    "tasks": len(st["task_create_hits"]), "pc": pc,
+                    "bytes": info["bytes_on_disk"], "text": text,
+                })
 
     m, st, stop = db.run(
         syx,
         img,
-        limit=points[-1] + 1_000_000,
+        limit=limit,
         extra_hook=hook,
         fast=True,
         verbose=False,
@@ -136,7 +191,8 @@ def make(points, prefix="snapshots/boot", syx=None, img_path=None,
         sdgate=sdgate,
         esdhc=esdhc,
     )
-    if box["saved"]:
+    box["stop"] = stop
+    if box["saved"] and not todo:
         # A snapshot carries no manifest on the cold-boot path -- save() is
         # called above without one -- so this sidecar is what lets a later
         # run (emu/run.py's need_snapshot) tell a ladder built with these
@@ -147,7 +203,7 @@ def make(points, prefix="snapshots/boot", syx=None, img_path=None,
         # pi-lens-ignore: ast-grep:unchecked-throwing-call-python
         os.makedirs(os.path.dirname(cfg_path) or ".", exist_ok=True)
         # pi-lens-ignore: ast-grep:unchecked-throwing-call-python
-        with open(cfg_path, "w") as fh:
+        with open(cfg_path + ".tmp", "w") as fh:
             json.dump({
                 "protocol": 1,
                 "sdgate": bool(sdgate),
@@ -155,6 +211,10 @@ def make(points, prefix="snapshots/boot", syx=None, img_path=None,
                 "points": points,
                 "main_sha256": hashlib.sha256(img).hexdigest(),
             }, fh)
+        replace_retry(cfg_path + ".tmp", cfg_path)
+    elif todo and progress is None:
+        print("  ladder incomplete: %d of %d rungs saved, stop=%s"
+              % (len(box["saved"]), len(points), stop), flush=True)
     return box["saved"]
 
 

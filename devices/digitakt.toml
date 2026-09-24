@@ -24,11 +24,32 @@
 [device]
 name = "Digitakt"
 short = "dt1"
+# SysEx framing ids of every OS file for this product: byte 4 (transport id)
+# and byte 8 (OS-stream id) of the 16-byte framing message. Measured on OS
+# 1.53. They identify the PRODUCT, so emu/release.py can name a release no
+# [[firmware]] entry lists; the hash below stays the identity of a release.
+sysex_id = 0x0a
+os_stream_id = 0x05
 
 [[firmware]]
 version = "1.53"
 sha256 = "9bdd44bb6102fb25c143cfab97bc92b7a89c463f795d3112dce89771e29bcc92"
 filename = "Digitakt_OS1.53.syx"
+
+# What first boot must leave in RAM before emu/bootstrap.py stamps a settled
+# gui.snap (accept_settled; the card itself is checked for every release).
+# OS 1.53 addresses, each a big-endian u32, from the +Drive first-boot
+# investigation of 2026-09-23 (HANDOFF-2026-09-23.md; static analysis of the
+# factory-reset job FUN_4000aeb2, read back from the settled snapshots of
+# two independent first boots): the job ends with error code 0 and its
+# progress counter at its total (0x40000/0x40000), and a pre-formatted ekFS
+# mounts at ~218.7M (mounted = 1; 0 on a card with no ekFS). The pixel-based
+# settle rule alone would also "settle" after a job that failed.
+[firmware.acceptance]
+error_u32 = 0x406480e0       # must be 0; 0x0a = +Drive init failed, 0x1e+N = factory step N failed
+progress_done = 0x421cd4f4   # must equal progress_total
+progress_total = 0x421cd4f0
+mounted_u32 = 0x420edc50     # must be 1: the ekFS sample volume is mounted
 
 [panel]
 linear_channels = 0

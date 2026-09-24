@@ -28,8 +28,22 @@ back at 48 kHz afterwards. Either way the output is recorded: PLAY replays
 it (silent ends trimmed), SAVE WAV writes it out. --no-audio skips the audio
 model.
 
-    uv run python -m emu.dtpanel [snapshot] [--no-audio]
+SESSIONS. --save-on-exit PATH saves the machine to PATH when the window is
+closed: the emulator stops at a step boundary, the +Drive image is flushed,
+and the snapshot is written to PATH.tmp and renamed over PATH. Closing waits
+for that however long it takes; a save abandoned half way is a lost session.
+
+FAILURES are shown, not swallowed: a snapshot that will not open, an
+unrecognised firmware, a halt -- the emulator's `error` is drawn over the
+screen and on the status line, and main() says so in its return code. A
+snapshot made by a different build (its build manifest does not match) is
+its own case, INCOMPATIBLE: nothing failed, the snapshot has to be made
+again, and the portable app offers that instead of reporting a crash.
+
+    uv run python -m emu.dtpanel [snapshot] [--syx PATH]
+                                 [--save-on-exit PATH] [--no-audio]
 """
+import argparse
 import math
 import os
 import sys
@@ -46,6 +60,27 @@ SCALE = 4
 BG, FACE, EDGE = '#0b0d10', '#1c2027', '#2c323b'
 TEXT, DIM, AMBER = '#c9d3e0', '#6b7789', '#ffb638'
 LIT, REC_C, PLAY_C = '#3f4b5c', '#e2483d', '#3fbf6a'
+ERR = '#ff8f8f'                   # emu/gui.py's App uses the same for errors
+SCREEN_X, SCREEN_Y = 38, 102      # the OLED's top-left on the canvas
+
+# main()'s return codes, besides 0 (closed cleanly, session saved if asked),
+# 1 (the emulator failed or halted) and 2 (the session was not saved).
+# 4: the snapshot was made by a different build of the emulator or firmware
+# (emu.gui's Emulator.incompatible) -- rebuild needed, nothing is broken.
+INCOMPATIBLE = 4
+# 5: the snapshot (or what it needs: the firmware, the device files) could
+# not be opened at all, for another reason -- a truncated or damaged file,
+# say. Distinct from 1 so a launcher can stop offering that snapshot.
+LOAD_FAILED = 5
+# For arguments it cannot parse. 2 is argparse's usual choice, but here 2
+# already means "the session was not saved".
+USAGE_ERROR = 64
+
+
+def _first_line(text, limit=160):
+    """The first non-blank line of `text`, cut to `limit` characters."""
+    line = next((s.strip() for s in str(text).splitlines() if s.strip()), '')
+    return line if len(line) <= limit else line[:limit - 3] + '...'
 
 # Key LEDs. An unlit key is still sent a colour -- palette 02, (1,1,1) of 31,
 # the backlight glow -- so anything this dim is drawn as off. A lit key's face
@@ -133,15 +168,24 @@ PANEL_W, PANEL_H = 1160, 790      # the drawn control surface
 
 
 class DigitaktPanel(tk.Tk):
-    def __init__(self, snapshot, syx=None, audio=True):
+    # How long closing waits for the emulator to reach a step boundary. A
+    # step is well under a second, so this only ever expires on a worker
+    # stuck inside Unicorn. It does NOT bound a flush or save in progress,
+    # nor a snapshot still loading (which goes straight on to them): see
+    # _wait_for_worker.
+    STOP_TIMEOUT = 5.0
+
+    def __init__(self, snapshot, syx=None, audio=True, save_on_exit=None):
         super().__init__()
-        self.title('digikit — Digitakt mk1 emulator (unofficial)')
+        self.title('digiemu — Digitakt mk1 emulator (unofficial)')
         self.configure(bg=BG)
         self.canvas = tk.Canvas(self, width=PANEL_W, height=PANEL_H, bg=BG,
                                 highlightthickness=0)
         self.canvas.pack(fill='both', expand=True)
 
-        self.emu = Emulator(snapshot, syx=syx, audio=audio)
+        self.emu = Emulator(snapshot, syx=syx, audio=audio,
+                            save_on_exit=save_on_exit)
+        self._error_shown = None          # the failure currently drawn
         self.player = audioout.Player()
         self._audio_note = ('', 0.0)     # (message, shown until)
         self.held = set()        # codes currently asserted
@@ -218,7 +262,7 @@ class DigitaktPanel(tk.Tk):
         self._rr(16, 14, 1128, 58, 10, fill='#101318', outline=EDGE)
         # The project's own name, not the product's branding: no logo mark,
         # wordmark or tagline from the hardware.
-        c.create_text(46, 43, text='digikit', fill='#f2f5f9',
+        c.create_text(46, 43, text='digiemu', fill='#f2f5f9',
                       font=('Helvetica', 23, 'bold'), anchor='w')
         c.create_text(170, 45, text='Digitakt mk1 emulator · unofficial, not '
                       'affiliated with Elektron', fill=DIM,
@@ -227,7 +271,15 @@ class DigitaktPanel(tk.Tk):
                       font=('Helvetica', 11), anchor='e')
         self._rr(24, 88, W * SCALE + 28, H * SCALE + 28, 8,
                  fill='#05070a', outline='#39414d')
-        c.create_image(38, 102, image=self.big, anchor='nw')
+        c.create_image(SCREEN_X, SCREEN_Y, image=self.big, anchor='nw')
+        # Covers the screen when the emulator fails; see _show_failure.
+        self.err_box = c.create_rectangle(
+            SCREEN_X, SCREEN_Y, SCREEN_X + W * SCALE, SCREEN_Y + H * SCALE,
+            fill='#05070a', outline='', state='hidden')
+        self.err_text = c.create_text(
+            SCREEN_X + 14, SCREEN_Y + 14, text='', fill=ERR,
+            font=('Helvetica', 10), anchor='nw', width=W * SCALE - 28,
+            state='hidden')
         self.status = c.create_text(24, 768, text='booting...', fill=DIM,
                                     font=('Helvetica', 10), anchor='w')
         clear = c.create_text(1144, 768, text='clear latched', fill=DIM,
@@ -581,11 +633,113 @@ class DigitaktPanel(tk.Tk):
         if emu is not None and emu.is_alive():
             emu.stop_flag.set()
             emu.pause.clear()
-            emu.join(timeout=5)
+            if getattr(emu, 'save_on_exit', None):
+                self._say('saving the session -- this window closes when '
+                          'it is written', AMBER)
+            self._wait_for_worker(emu)
         try:
             self.destroy()
         except tk.TclError:          # already torn down
             pass
+
+    def _say(self, text, fill=DIM):
+        """Put `text` on the status line now, even with no mainloop running."""
+        try:
+            self.canvas.itemconfigure(self.status, text=text, fill=fill)
+            self.update_idletasks()
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _wait_for_worker(self, emu):
+        """Join the emulator thread. -> True once it has ended.
+
+        The old fixed 5 s join gave up on a flush (and now a save) that was
+        still running; then interpreter teardown freed Unicorn under the
+        thread and the card was left half written. So the timeout applies
+        only while the worker is stepping, where it can only mean a thread
+        stuck inside Unicorn. Loading (which, with stop_flag set, goes
+        straight on to the flush and save) and `finishing` are waited out
+        in full: both are bounded work, and abandoning either loses the
+        session.
+        """
+        deadline = time.monotonic() + self.STOP_TIMEOUT
+        while emu.is_alive():
+            emu.join(0.1)
+            if emu.finishing.is_set() or not emu.ready.is_set():
+                deadline = time.monotonic() + self.STOP_TIMEOUT
+                continue
+            if time.monotonic() >= deadline:
+                print('[dtpanel] the emulator did not stop within %.0f s; '
+                      'leaving it' % self.STOP_TIMEOUT, flush=True)
+                return False
+        return True
+
+    def exit_code(self):
+        """-> main()'s return code: 0 clean, 1 emulator failed, 2 not saved,
+        4 (INCOMPATIBLE) the snapshot is from another build, 5 (LOAD_FAILED)
+        the snapshot could not be opened."""
+        emu = self.emu
+        # Before `error`, which is also set: the launcher offers a rebuild
+        # for this one rather than reporting a failure.
+        if getattr(emu, 'incompatible', False):
+            return INCOMPATIBLE
+        # The snapshot itself would not open. Not a missing firmware or device
+        # file (config.NotFound, device.DeviceError): another snapshot would
+        # fail the same way, so those stay plain failures.
+        if (emu.error
+                and getattr(emu, 'stats', {}).get('status') == 'failed to load'
+                and not str(emu.error).startswith(('DeviceError', 'NotFound'))):
+            return LOAD_FAILED
+        if emu.error or emu.is_alive():
+            return 1
+        if emu.save_on_exit and not emu.saved:
+            return 2
+        return 0
+
+    # --------------------------------------------------------------- failure
+    def _failure(self):
+        """-> why the emulator is not running, or None while it is healthy."""
+        emu = self.emu
+        if emu.error:
+            return emu.error
+        if not emu.is_alive() and not emu.stop_flag.is_set():
+            return 'the emulator thread ended unexpectedly; see the log'
+        return None
+
+    def _show_failure(self, text):
+        """Draw the emulator's failure over the screen and on the status line.
+
+        A window that simply stops -- a black screen and 'AUDIO off' -- is
+        what an unrecognised firmware, a snapshot from another build or a
+        halt all used to look like. The whole message goes over the screen,
+        where there is room for it; the status line gets its first line.
+        """
+        if text == self._error_shown:
+            return
+        self._error_shown = text
+        loading = self.emu.stats.get('status') == 'failed to load'
+        incompatible = getattr(self.emu, 'incompatible', False)
+        if incompatible:
+            head = 'This snapshot was made by a different build.'
+        elif loading:
+            head = 'The snapshot could not be opened.'
+        else:
+            head = 'The emulator stopped.'
+        body = text if len(text) <= 1500 else text[:1500] + ' ...'
+        c = self.canvas
+        c.itemconfigure(self.err_text, text='%s\n\n%s' % (head, body),
+                        state='normal')
+        c.itemconfigure(self.err_box, state='normal')
+        c.tag_raise(self.err_box)
+        c.tag_raise(self.err_text)
+        if incompatible:
+            # Not a crash, so not worded or coloured as one: the message
+            # leads with its own verdict ('incompatible snapshot: rebuild
+            # needed.').
+            c.itemconfigure(self.status, fill=AMBER, text=_first_line(text))
+        else:
+            c.itemconfigure(self.status, fill=ERR,
+                            text='EMULATOR STOPPED  ' + _first_line(text))
 
     # ------------------------------------------------------------------ loop
     def tick(self):
@@ -634,34 +788,105 @@ class DigitaktPanel(tk.Tk):
         fb = getattr(emu, 'fb', None)
         if fb:
             self.draw_screen(fb)
+        failure = self._failure()
+        if failure:
+            self._show_failure(failure)
+            return
         held = ', '.join(sorted(self.codes and
                                 [n for n, c in self.codes.items()
                                  if c in self.held] or [])) or '-'
-        self.canvas.itemconfigure(
-            self.status, text='held: %s      (shift-click latches, Esc clears)'
-                              % held)
+        text = 'held: %s      (shift-click latches, Esc clears)' % held
+        if emu.device_error:
+            text += '      no controls: ' + _first_line(emu.device_error, 90)
+        self.canvas.itemconfigure(self.status, text=text, fill=DIM)
+
+
+class _Stop(Exception):
+    """argparse asked to exit; main() returns `code` instead."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+class _Parser(argparse.ArgumentParser):
+    # argparse exits the process on --help and on a bad argument. main() is
+    # also called in-process, by the portable app's worker, which needs a
+    # return code rather than a SystemExit; and a windowed build has no
+    # stderr for the usage text, so it goes to stdout (the worker's log).
+    def exit(self, status=0, message=None):
+        if message:
+            print(message, end='', flush=True)
+        raise _Stop(status)
+
+    def error(self, message):
+        self.print_usage(sys.stdout)
+        self.exit(USAGE_ERROR, '%s: error: %s\n' % (self.prog, message))
+
+
+def parse_args(argv):
+    """-> Namespace(snapshot, syx, save_on_exit, audio). Raises _Stop."""
+    ap = _Parser(prog='python -m emu.dtpanel',
+                 description='The Digitakt mk1 front panel.')
+    ap.add_argument('snapshot', nargs='?',
+                    help='the snapshot to open (default: the firmware\'s own, '
+                         'from emu.run.paths_for)')
+    # The old form, `dtpanel SNAP SYX`, still works.
+    ap.add_argument('legacy_syx', nargs='?', help=argparse.SUPPRESS)
+    ap.add_argument('--syx', help='the firmware .syx (default: DT2_SYX, or '
+                                  'the only .syx in the working directory)')
+    ap.add_argument('--save-on-exit', metavar='PATH',
+                    help='on a clean close, save the session here (written '
+                         'to PATH.tmp, then renamed over PATH)')
+    # --no-audio: skip the audio model, for speed or for a snapshot whose
+    # audio DMA is not set up (the window says so either way).
+    ap.add_argument('--no-audio', dest='audio', action='store_false',
+                    help='skip the audio model')
+    args = ap.parse_args(argv)
+    if args.legacy_syx:
+        if args.syx and args.syx != args.legacy_syx:
+            ap.error('two firmware files given: %s and %s'
+                     % (args.legacy_syx, args.syx))
+        args.syx = args.syx or args.legacy_syx
+    del args.legacy_syx
+    return args
 
 
 def main(argv):
-    # --no-audio: skip the audio model, for speed or for a snapshot whose
-    # audio DMA is not set up (the window says so either way).
-    audio = '--no-audio' not in argv
-    argv = [a for a in argv if a != '--no-audio']
-    syx = argv[1] if len(argv) > 1 else None
+    """Run the panel until its window closes. -> the process exit code.
+
+    0 on a clean close -- with --save-on-exit, only once the session is
+    written; 1 if the emulator failed while running (its `error`: the run
+    halted or crashed); 2 if the session could not be saved; 4
+    (INCOMPATIBLE) if the snapshot was made by a different build -- rebuild
+    needed; 5 (LOAD_FAILED) if the snapshot, the firmware or the device
+    files could not be opened; 64 (USAGE_ERROR) for arguments it cannot
+    parse.
+    """
+    try:
+        args = parse_args(argv)
+    except _Stop as stop:
+        return stop.code
     # The panel is for using the instrument, so its +Drive persists: whatever
-    # the firmware writes to the card lands in plusdrive.img next to the
-    # firmware, unless DT2_PLUSDRIVE already says otherwise.
-    os.environ.setdefault('DT2_PLUSDRIVE', 'plusdrive.img')
-    if argv:
-        snap = argv[0]
-    else:
+    # the firmware writes to the card lands in plusdrive.img in the working
+    # directory -- unless DT2_PLUSDRIVE is set, which always wins (even set
+    # empty: an in-memory card).
+    if 'DT2_PLUSDRIVE' not in os.environ:
+        os.environ['DT2_PLUSDRIVE'] = 'plusdrive.img'
+    snap = args.snapshot
+    if not snap:
         # Only the tested build keeps the historic top-level snapshot path;
         # every other firmware gets its own directory, so ask run.paths_for
         # rather than assuming the flat name and failing on a product whose
         # snapshots are one level down.
-        from emu import run as _run
-        snap, _prefix = _run.paths_for(config.firmware(syx))
-    app = DigitaktPanel(snap, syx=syx, audio=audio)
+        try:
+            from emu import run as _run
+            snap, _prefix = _run.paths_for(config.firmware(args.syx))
+        except SystemExit as exc:    # config.NotFound: no window to show it
+            print('[dtpanel] %s' % exc, flush=True)
+            return 1
+    app = DigitaktPanel(snap, syx=args.syx, audio=args.audio,
+                        save_on_exit=args.save_on_exit)
     try:
         app.mainloop()
     finally:
@@ -669,7 +894,8 @@ def main(argv):
         # all bypass WM_DELETE_WINDOW and would leave the worker inside
         # Unicorn while the interpreter frees it.
         app.quit_all()
+    return app.exit_code()
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    sys.exit(main(sys.argv[1:]))

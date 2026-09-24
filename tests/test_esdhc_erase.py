@@ -53,10 +53,33 @@ class EraseTest(unittest.TestCase):
             self.assertEqual(card.data_for(18, 0, 512), b'\x00' * 512)
             self.assertEqual(card.data_for(18, 2, 512), b'\xEE' * 512)
             card.flush()
+            card.close()
             with open(path, 'rb') as f:
                 on_disk = f.read()
             self.assertEqual(on_disk[:1024], b'\x00' * 1024)
             self.assertEqual(on_disk[1024:2048], b'\xEE' * 1024)
+
+    def test_erase_inside_the_file_is_zeroed_in_pieces(self):
+        # Card.flush zeroes a megabyte at a time rather than allocating the
+        # whole range at once (a first boot erases 512 MB inside the file);
+        # a range that is not a whole number of pieces must still end exactly.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'plusdrive.img')
+            size = 3 << 20
+            with open(path, 'wb') as f:
+                f.write(b'\xEE' * size)
+            card = Card(path=path)
+            first, last = 1, (5 << 20) // 1024      # sectors 1 .. 2.5 MB
+            erase(card, first, last)
+            card.flush()
+            card.close()
+            with open(path, 'rb') as f:
+                on_disk = f.read()
+            lo, hi = first * 512, (last + 1) * 512
+            self.assertEqual(len(on_disk), size)
+            self.assertEqual(on_disk[:lo], b'\xEE' * lo)
+            self.assertEqual(on_disk[lo:hi], bytes(hi - lo))
+            self.assertEqual(on_disk[hi:], b'\xEE' * (size - hi))
 
     def test_huge_erase_past_end_of_file_does_not_grow_it(self):
         # FORMAT's last range runs to sector 3816527, ~1.8 GB. Beyond the
@@ -68,6 +91,7 @@ class EraseTest(unittest.TestCase):
             card.flush()
             self.assertLess(os.path.getsize(path), 1 << 20)
             self.assertEqual(card.data_for(18, 1835008, 512), b'\x00' * 512)
+            card.close()
 
     def test_erase_ranges_merge(self):
         card = Card()

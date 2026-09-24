@@ -49,6 +49,7 @@ import mmap
 import os
 import struct
 
+from emu import sparse
 from emu.edma import (
     SERQ,
     TCD_BASE,
@@ -277,6 +278,10 @@ def ext_csd(sectors=PART['sectors_slc'], slc=True):
     return bytes(b)
 
 
+# Card.flush zeroes erased ranges inside the file this many bytes at a time.
+_ZERO_CHUNK = 1 << 20
+
+
 class Card:
     """A minimal eMMC. Only what the identification sequence asks for.
 
@@ -295,14 +300,16 @@ class Card:
         self.image = image
         # An on-disk image: memory-mapped, so reads cost nothing and the file
         # stays sparse. Writes still land in `overlay` and reach the file at
-        # flush(). Created if missing, one sector long.
+        # flush(). Created if missing, one sector long, and marked sparse on
+        # Windows so later growth and erases do not allocate (emu/sparse.py).
         self.path = path
         self._fh = None
         if path:
             new = not os.path.exists(path) or os.path.getsize(path) == 0
             self._fh = open(path, 'a+b' if new else 'r+b')
             if new:
-                self._fh.truncate(512)
+                sparse.make_sparse(self._fh)
+                sparse.extend(self._fh, 512)
             self._fh.seek(0)
             self.image = mmap.mmap(self._fh.fileno(), 0)
         self.blocks = capacity_blocks
@@ -431,31 +438,75 @@ class Card:
     def flush(self):
         """Fold every overlaid byte into the image file. No-op without a path.
 
-        The overlay is kept: reads prefer it and it is what snapshots carry,
-        so a snapshot restored without the file still sees the same bytes.
+        The overlay is kept: reads prefer it, so this card still reads the
+        same bytes afterwards. Snapshots of a file-backed card do NOT carry it
+        any more -- see Esdhc.checkpoint_state, which empties it once it is on
+        disk.
         """
         if not self.path or not (self.overlay or self.erased):
             return
+        if self.image is None:
+            raise ValueError('%s: card closed with unwritten data' % self.path)
+        # Writes through a mapped view do not move the file's modification
+        # time on Windows -- measured on NTFS: not at the write, not at
+        # mmap.flush, not when the view or the handle is closed. Whoever
+        # decides "has the card changed since this snapshot?" from size and
+        # mtime (emu/bootstrap.py's card_stamp) would then never see a
+        # session's writes, so stamp the file explicitly -- BEFORE the first
+        # byte as well as after the last. A flush killed half way (Cancel
+        # terminates the worker; a logoff ends the panel mid-save) then
+        # leaves a card whose stamp no longer matches any snapshot, instead
+        # of a half-written card that still looks like the old one.
+        os.utime(self.path)
         # Only the part of an erase that the file actually covers has to be
         # written: beyond end-of-file the image is sparse and already reads
-        # as zero, so a 967 MB erase does not have to allocate 967 MB.
+        # as zero, so a 967 MB erase does not have to allocate 967 MB. On a
+        # sparse file (Windows NTFS, emu/sparse.py) the part inside is
+        # deallocated rather than written; otherwise it is zeroed a megabyte
+        # at a time, not with one bytes(hi - lo): a first boot erases 512 MB
+        # inside the file, and one slice assignment allocated all 512 MB of
+        # zeros at once.
+        zeros = None
+        holes = sparse.is_sparse(self._fh)
+        if holes and self.erased:
+            self.image.flush()           # nothing dirty in a range it drops
         for lo, hi in self.erased:
             hi = min(hi, len(self.image))
-            if lo < hi:
-                self.image[lo:hi] = bytes(hi - lo)
-        if not self.overlay:
-            self.image.flush()
-            return
-        need = max(self.overlay) + 1
-        if need > len(self.image):
-            # grow the file (sparse) and remap
-            self.image.close()
-            self._fh.truncate(need)
-            self._fh.seek(0)
-            self.image = mmap.mmap(self._fh.fileno(), 0)
-        for offset, value in self.overlay.items():
-            self.image[offset] = value
+            if lo >= hi or (holes and sparse.zero_range(self._fh, lo, hi)):
+                continue
+            for a in range(lo, hi, _ZERO_CHUNK):
+                b = min(hi, a + _ZERO_CHUNK)
+                if zeros is None:
+                    zeros = bytes(_ZERO_CHUNK)
+                self.image[a:b] = zeros[:b - a]
+        if self.overlay:
+            need = max(self.overlay) + 1
+            if need > len(self.image):
+                # grow the file (sparse: no zeros written) and remap
+                self.image.close()
+                sparse.extend(self._fh, need)
+                self.image = mmap.mmap(self._fh.fileno(), 0)
+            for offset, value in self.overlay.items():
+                self.image[offset] = value
         self.image.flush()
+        os.utime(self.path)
+
+    def close(self):
+        """Release the memory map and then the file handle. Safe to repeat.
+
+        Does NOT flush: call flush() first if the overlay should reach the
+        file. Needed because the map pins the file -- on Windows a mapped
+        file cannot be renamed, replaced or deleted -- and nothing else
+        releases it until the whole Machine is garbage-collected. After this
+        the card reads as blank; it is meant for the end of a run.
+        """
+        if self._fh is None:
+            return
+        if self.image is not None:
+            self.image.close()
+            self.image = None
+        self._fh.close()
+        self._fh = None
 
 
 class Esdhc:
@@ -519,8 +570,21 @@ class Esdhc:
                          begin=SERQ, end=SERQ)
 
     def checkpoint_state(self):
-        """Preserve card state that is not represented in guest memory."""
+        """Preserve card state that is not represented in guest memory.
+
+        For a FILE-BACKED card the file is the truth once flushed, so the
+        snapshot stores an empty overlay and no erased ranges, and the card
+        drops both from memory too. Carrying them made a snapshot replay its
+        own card writes over the file on every restore: a gui.snap built by a
+        first boot held ~3.9M written bytes and a 512 MB erase, which hid or
+        zeroed whatever a later session had written there, and cost hundreds
+        of MB of host memory as a per-byte dict. An in-memory card (no path)
+        has nowhere else to keep its bytes, so it still carries them.
+        """
         self.card.flush()
+        if self.card.path:
+            self.card.overlay = {}
+            self.card.erased = []
         return {
             'type': 'Esdhc',
             'version': 1,

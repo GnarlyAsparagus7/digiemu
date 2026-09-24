@@ -1,6 +1,8 @@
 """Synthetic eSDHC/eDMA data-path coverage; no firmware input required."""
 
+import os
 import struct
+import tempfile
 import unittest
 
 from emu.edma import (
@@ -121,6 +123,52 @@ class EsdhcBulkReadTest(unittest.TestCase):
         restored = Esdhc(FakeMachine())
         restored.restore_checkpoint_state(model.checkpoint_state())
         self.assertEqual(restored.card.data_for(18, 7, 512), payload)
+
+
+class EsdhcCheckpointCardTest(unittest.TestCase):
+    """What a snapshot carries of the card depends on where the card lives."""
+
+    def test_in_memory_card_carries_its_writes(self):
+        model = Esdhc(FakeMachine(), card=Card())
+        model.card.write_data(25, 3, b'\x5A' * 512)
+        model.card.erase(0, 512)
+        state = model.checkpoint_state()
+        self.assertEqual(len(state['card_overlay']), 512)
+        self.assertEqual(state['card_erased'], [[0, 512]])
+        self.assertEqual(len(model.card.overlay), 512)
+
+    def test_file_backed_card_flushes_and_carries_nothing(self):
+        # The file is the truth once flushed. A snapshot that carried the
+        # overlay replayed it over the file on every restore, hiding anything
+        # written there later.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 'plusdrive.img')
+            with open(path, 'wb') as f:
+                f.write(b'\xEE' * 4096)
+            card = Card(path=path)
+            model = Esdhc(FakeMachine(), card=card)
+            card.write_data(25, 3, b'\x5A' * 512)
+            card.erase(0, 1024)
+            state = model.checkpoint_state()
+            self.assertEqual(state['card_overlay'], {})
+            self.assertEqual(state['card_erased'], [])
+            self.assertEqual(card.overlay, {})
+            self.assertEqual(card.erased, [])
+            self.assertEqual(card.data_for(18, 3, 512), b'\x5A' * 512)
+            self.assertEqual(card.data_for(18, 0, 512), bytes(512))
+            card.close()
+
+            # A later session writes to the file; restoring the snapshot must
+            # not put the old bytes back over it.
+            with open(path, 'r+b') as f:
+                f.seek(3 * 512)
+                f.write(b'\x77' * 512)
+            card2 = Card(path=path)
+            restored = Esdhc(FakeMachine(), card=card2)
+            restored.restore_checkpoint_state(state)
+            self.assertEqual(card2.data_for(18, 3, 512), b'\x77' * 512)
+            self.assertEqual(card2.data_for(18, 2, 512), b'\xEE' * 512)
+            card2.close()
 
 
 if __name__ == "__main__":

@@ -22,7 +22,10 @@ Environment variables:
 
 Discovery is by pattern, not by literal name, so another Elektron device's
 sections work without editing anything -- `section_3_MAIN_OS.bin` is one
-device's naming, not a law.
+device's naming, not a law. Only the file name is a pattern: the directory
+part is glob.escape'd, because a folder called `digikit [v0.1]` is an
+ordinary place to unzip an app, and unescaped its brackets are a character
+class that matches nothing -- which reported the sections as missing.
 """
 import glob
 import os
@@ -76,6 +79,9 @@ def firmware(explicit=None):
         if not os.path.exists(env):
             raise NotFound('DT2_SYX points at a missing file: %s' % env)
         return env
+    # Relative on purpose: glob lists the working directory without parsing
+    # its name as a pattern, so a '[' in it is harmless -- and the bare
+    # names are what TESTED_SYX is compared with below.
     found = sorted(glob.glob('*.syx'))
     if len(found) == 1:
         return found[0]
@@ -110,7 +116,7 @@ def main_image(explicit=None):
             raise NotFound('DT2_MAIN_IMG points at a missing file: %s' % env)
         return env
     d = sections_dir()
-    found = sorted(glob.glob(os.path.join(d, '*MAIN_OS*.bin')))
+    found = sorted(glob.glob(os.path.join(glob.escape(d), '*MAIN_OS*.bin')))
     if len(found) == 1:
         return found[0]
     if not found:
@@ -130,7 +136,7 @@ def bootstrap(explicit=None):
             raise NotFound('No such bootstrap image: %s' % explicit)
         return explicit
     d = sections_dir()
-    found = sorted(glob.glob(os.path.join(d, 'section_2_*.bin')))
+    found = sorted(glob.glob(os.path.join(glob.escape(d), 'section_2_*.bin')))
     if found:
         return found[0]
     raise NotFound('No section 2 (bootstrap) in %s/. Extract the sections '

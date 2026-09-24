@@ -19,22 +19,26 @@ has stopped being drawn, not how long that took.
 
 Untorn frames only -- panel.read at an arbitrary instant returns a frame torn
 on a page boundary, so it cannot be used to decide this.
+
+The run itself is emu/bootstrap.py's settle_ui(), which the portable app's
+first run calls in-process; this is its command line, with the same flags,
+defaults and printed lines. What changed with the move: frames are counted as
+they are drawn instead of through panel.Capture, whose 4096-frame cap froze
+the quiet-run count before a first boot on a fresh card (~4100 frames) could
+finish; a task created during the run no longer crashes the save; the
+snapshot is saved (to --out.tmp, then renamed) BEFORE the PNG; and an
+emulator stop ends the run with its reason. The exit code is 0 either way.
 """
 import argparse
-import collections
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from emu import config, longrun, panel, symbols
-from emu.snapshot import save
-from emu.uiresume import open_snapshot
-
-GUI_FLAGS = dict(unblock=True, softfloat=True, bitmap=True, dsp=True)
+from emu.bootstrap import StepFailed, settle_ui           # noqa: E402
 
 
-def main():
+def parser():
     ap = argparse.ArgumentParser()
     ap.add_argument('--syx', required=True)
     ap.add_argument('--snapshot', default='snapshots/Digitakt_OS1.53/gui.snap')
@@ -48,74 +52,25 @@ def main():
     ap.add_argument('--budget', type=lambda s: int(s, 0), default=3_000_000_000)
     ap.add_argument('--chunk', type=lambda s: int(s, 0), default=50_000_000)
     ap.add_argument('--png', default='out/uisettle.png')
-    args = ap.parse_args()
+    return ap
 
-    img = open(config.main_image(), 'rb').read()
-    prof = symbols.resolve(img, load_addr=0x40000400)
 
-    flags = dict(GUI_FLAGS)
-    if prof.frame_sem is not None:
-        flags['unblock_except'] = (prof.frame_sem,)
-    m, ev, st, pc, inq, at, pits = open_snapshot(
-        args.snapshot, args.syx, prof, **flags)
+def _show(event):
+    if event.text:
+        print(event.text, flush=True)
 
-    hits = collections.Counter()
-    for name in ('job_pump', 'mainloop'):
-        addr = getattr(prof, name, None)
-        if addr:
-            at(addr, (lambda n: (lambda *_: hits.__setitem__(n, hits[n] + 1)))(name))
 
-    cap = panel.Capture(at, diff_addr=getattr(prof, 'panel_diff', None),
-                        front_addr=prof.fb_front)
-
-    print('%6s %-8s %-9s %-10s %-9s %s'
-          % ('instr', 'frames', 'overlays', 'quiet-run', 'jobs', 'state'))
-    total = 0
-    settled = None
-    while total < args.budget:
-        pc, _e, _w = longrun.spin(m, pc, args.chunk, pits=pits)
-        total += args.chunk
-        lits = [len(panel.lit(b)) for b in cap.frames]
-        overlays = sum(1 for n in lits if n <= args.min_lit)
-        # Length of the trailing run of main-UI frames.
-        run = 0
-        for n in reversed(lits):
-            if n <= args.min_lit:
-                break
-            run += 1
-        print('%5dM %-8d %-9d %-10d %-9d %s'
-              % (total // 1_000_000, len(lits), overlays, run,
-                 hits['job_pump'],
-                 'settled' if run >= args.quiet else 'first-boot work'),
-              flush=True)
-        if run >= args.quiet:
-            settled = total
-            break
-
-    print('')
-    if settled is None:
-        print('NOT SETTLED after %dM instructions -- the +Drive overlay is '
-              'still being drawn.' % (args.budget // 1_000_000))
-    else:
-        print('SETTLED at %dM: %d consecutive main-UI frames with no overlay.'
-              % (settled // 1_000_000, args.quiet))
-
-    buf = cap.frames[-1] if cap.frames else None
-    if buf:
-        panel.write_png(buf, args.png, scale=6)
-        print('screen (%d lit) -> %s' % (len(panel.lit(buf)), args.png))
-
-    if args.out and settled is not None:
-        os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
-        ev['claim_checkpoint_component']('timers', pits)
-        save(m, args.out, extra={'n': total, 'tasks': dict(ev.get('tasks', {}))},
-             components=ev['checkpoint_components'],
-             manifest=ev.get('checkpoint_manifest'))
-        print('saved %s' % args.out)
-    elif args.out:
-        print('not saving: the UI never settled, so this snapshot would have '
-              'the same fault as the one it replaces')
+def main(argv=None):
+    args = parser().parse_args(argv)
+    try:
+        settle_ui(args.syx, args.snapshot, out=args.out or None,
+                  progress=_show, min_lit=args.min_lit, quiet=args.quiet,
+                  budget=args.budget, chunk=args.chunk,
+                  png=args.png or None, except_frame_sem=True)
+    except StepFailed as exc:
+        print('stopped: %s' % exc.reason, flush=True)
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

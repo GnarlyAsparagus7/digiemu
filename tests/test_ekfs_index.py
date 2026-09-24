@@ -12,14 +12,10 @@ value below is firmware-measured, not produced by the code under test:
   character after an equal digit run.
 """
 
-import importlib.util
 import os
 import struct
 import tempfile
 import unittest
-from pathlib import Path
-
-TOOL = Path("tools/ekfsadd.py")
 
 FW_HASH = {b'.': 0x71D73E48, b'..': 0x7C37AA9E, b'incoming': 0x8E2A7BCC,
            b'factory': 0xE90F5D74}
@@ -66,17 +62,16 @@ FW_BLOCKS = {
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("ekfsadd", TOOL)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    # The library, not the CLI: tools/ekfsadd.py is now a thin wrapper
+    # over emu/ekfsformat.py, which the portable app imports directly.
+    from emu import ekfsformat
+    return ekfsformat
 
 
 def _sign(x):
     return (x > 0) - (x < 0)
 
 
-@unittest.skipUnless(TOOL.exists(), "tools/ekfsadd.py absent")
 class EkfsIndexTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

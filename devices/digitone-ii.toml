@@ -13,6 +13,11 @@
 [device]
 name = "Digitone II"
 short = "dn2"
+# SysEx framing ids: byte 4 (transport id) and byte 8 (OS-stream id) of the
+# framing message, per docs/FINDINGS.md ("Incompatible OS"). They name the
+# product for emu/release.py; the hash below is still what names a release.
+sysex_id = 0x15
+os_stream_id = 0x10
 
 # Identity is the hash. The filename is a hint for error messages only:
 # people rename firmware files, and emu/config.py resolving one BY NAME is

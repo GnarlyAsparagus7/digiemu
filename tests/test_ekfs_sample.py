@@ -17,14 +17,10 @@ test:
   trailer copied from a BSS buffer nothing writes.
 """
 
-import importlib.util
 import os
 import struct
 import tempfile
 import unittest
-from pathlib import Path
-
-TOOL = Path("tools/ekfsadd.py")
 
 FW_FILE_HASH = {0: 0x43FA243A, 1: 0x2EDC4716, 11: 0xA60F96B9, 12: 0x98B5CD9F,
                 13: 0x3B7C486C, 16383: 0x384A80E3, 16384: 0x616A5837,
@@ -32,10 +28,10 @@ FW_FILE_HASH = {0: 0x43FA243A, 1: 0x2EDC4716, 11: 0xA60F96B9, 12: 0x98B5CD9F,
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("ekfsadd", TOOL)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    # The library, not the CLI: tools/ekfsadd.py is now a thin wrapper
+    # over emu/ekfsformat.py, which the portable app imports directly.
+    from emu import ekfsformat
+    return ekfsformat
 
 
 def _wav(frames, rate=48000, chans=1, bits=16, tag=1):
@@ -61,7 +57,6 @@ def _wav(frames, rate=48000, chans=1, bits=16, tag=1):
     return b"RIFF" + struct.pack("<I", len(riff)) + riff
 
 
-@unittest.skipUnless(TOOL.exists(), "tools/ekfsadd.py absent")
 class EkfsSampleTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -26,6 +26,19 @@ snapshots/
 # CI's cached patched Unicorn (.github/workflows/ci.yml)
 .ci-cache/
 
+# The portable app. portable/ is its dev data root, and firmware/ is the same
+# data if DIGIKIT_HOME points at the repo. Each firmware's folder holds the
+# user's .syx copy, sections, snapshots, the +Drive card and state
+# (firmware.json, .lock, a devices/ overlay). The rest is PyInstaller output.
+# tools/build-windows.ps1 builds outside the tree; these catch a run by hand.
+# packaging/digikit.spec is tracked; /*.spec is a spec PyInstaller generates.
+/portable/
+/firmware/
+/build/
+/dist/
+/build-out/
+/*.spec
+
 # NXP reference manuals: ~11 MB of vendor PDF, plus the text dump generated
 # from one of them. Fetch your own copies; the notes extracted from them
 # (docs/refs/*.md) are committed and cite chapter and table numbers.

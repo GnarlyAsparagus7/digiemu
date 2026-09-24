@@ -25,6 +25,7 @@ from unicorn.m68k_const import (
     UC_M68K_REG_SR,
 )
 
+from emu.checkpointver import CHECKPOINT_VERSION
 from emu.harness import PAGE, Machine
 
 REGS = (
@@ -32,8 +33,6 @@ REGS = (
     + [("a%d" % i, UC_M68K_REG_A0 + i) for i in range(8)]
     + [("pc", UC_M68K_REG_PC), ("sr", UC_M68K_REG_SR)]
 )
-
-CHECKPOINT_VERSION = 2
 
 
 class DeferredComponentRestore:

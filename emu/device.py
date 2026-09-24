@@ -10,6 +10,10 @@ image cannot tell us:
 
   * identity, keyed by the firmware's SHA-256. The filename is a hint for
     error messages; people rename firmware files, hashes do not change.
+  * the product's SysEx ids (`sysex_id`, `os_stream_id`): bytes 4 and 8 of
+    every OS file's framing message. They name the PRODUCT, not a release,
+    so emu/release.py can say "an untested Digitakt release" for a hash no
+    file lists. identify() below still matches by hash alone.
   * the wire mapping. The link carries (channel, bit) and the firmware reports
     a control code; channels 0..5 are linear and channel 6 is not, differently
     on each product.
@@ -39,10 +43,15 @@ class DeviceError(SystemExit):
 class Firmware:
     """One known firmware release of a device."""
 
-    def __init__(self, version, sha256, filename=None):
+    def __init__(self, version, sha256, filename=None, acceptance=None):
         self.version = version
         self.sha256 = sha256.lower()
         self.filename = filename
+        # [firmware.acceptance]: name -> guest address of a u32 that
+        # emu/bootstrap.py reads from the settled snapshot before it accepts
+        # a first boot (validate_acceptance there knows the names). None for
+        # a release nobody has measured; then only the card is checked.
+        self.acceptance = dict(acceptance) if acceptance else None
 
     def __repr__(self):
         return '<Firmware %s %s>' % (self.version, self.sha256[:12])
@@ -68,9 +77,16 @@ class Device:
     def __init__(self, name, short, firmwares, linear_channels, encoders,
                  exceptions, groups, path=None, intro_channels=(),
                  intro_unblocks_frame_sem=True, post_intro_ips=0,
-                 labels=None, leds=None, page_leds=(), audio=None):
+                 labels=None, leds=None, page_leds=(), audio=None,
+                 sysex_id=None, os_stream_id=None):
         self.name = name
         self.short = short
+        # The SysEx framing ids of this product's OS files: byte 4 (the
+        # transport/device id) and byte 8 (the OS-stream id the bootstrap
+        # checks -- a mismatch is its 'Incompatible OS'). None when the
+        # device file does not say, and then no release is matched by ids.
+        self.sysex_id = sysex_id
+        self.os_stream_id = os_stream_id
         self.firmwares = tuple(firmwares)
         self.linear_channels = linear_channels
         self.encoders = encoders
@@ -165,7 +181,8 @@ def load(path):
     dev = _require(raw, 'device', path)
     panel = _require(raw, 'panel', path)
     firmwares = [Firmware(f.get('version'), _require(f, 'sha256', path),
-                          f.get('filename'))
+                          f.get('filename'),
+                          _acceptance(f.get('acceptance'), path))
                  for f in raw.get('firmware', ())]
     # TOML bare keys are strings even when they look like integers, so the
     # exception table's control codes arrive as '49' rather than 49.
@@ -195,7 +212,37 @@ def load(path):
         leds={int(k): int(v) for k, v in panel.get('leds', {}).items()},
         page_leds=[int(v) for v in panel.get('page_leds', ())],
         audio=_audio(raw.get('audio'), path),
+        sysex_id=_sysex_byte(dev, 'sysex_id', path),
+        os_stream_id=_sysex_byte(dev, 'os_stream_id', path),
     )
+
+
+def _sysex_byte(table, key, where):
+    """-> an optional [device] id as an int 0..0x7F, or None if absent.
+
+    These are SysEx data bytes, so anything outside 7 bits cannot be one and
+    is a typo worth refusing rather than a product nobody will ever match.
+    """
+    value = table.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) \
+            or not 0 <= value <= 0x7F:
+        raise DeviceError('%s: [device] %s must be an integer 0..0x7f, got %r'
+                          % (where, key, value))
+    return value
+
+
+def _acceptance(table, where):
+    """-> [firmware.acceptance] as {name: int address}, or None if absent."""
+    if table is None:
+        return None
+    if not isinstance(table, dict) or any(
+            isinstance(v, bool) or not isinstance(v, int)
+            or not 0 <= v <= 0xFFFFFFFF for v in table.values()):
+        raise DeviceError('%s: [firmware.acceptance] must map names to '
+                          '32-bit addresses' % where)
+    return dict(table)
 
 
 def _audio(table, where):

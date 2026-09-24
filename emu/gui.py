@@ -49,15 +49,22 @@ keep up.
 default 18720000 (4x INSTR_PER_SEC); 0 keeps the default rate; ignored when
 --ips-at is given.
 
+Emulator(..., save_on_exit=PATH) saves the running machine to PATH when it is
+stopped cleanly, after the +Drive image has been flushed, so the next session
+resumes where this one ended instead of on RAM that no longer matches the
+card. See Emulator._save_session.
+
 tkinter only, no third-party GUI dependency. Note Homebrew's python@3.14 does
 not ship tkinter; uv's managed CPython does, which is why pyproject pins 3.12.
 """
+import ast
 import collections
 import os
 import struct
 import sys
 import threading
 import time
+import traceback
 import tkinter as tk
 from tkinter import ttk
 
@@ -71,6 +78,7 @@ from emu import (audioout, config, device as devices, edma_sw, intfrc,
                  native, panel, panelin, panelleds, symbols)
 from emu.pit import INSTR_PER_SEC, Pits, intro_running
 from emu.screen import png
+from emu.snapshot import _SnapshotUnpickler, save as save_snapshot
 
 # The intro's frame rate is not a guess. PIT3 is configured at 0x400d3a7a with
 # PCSR=0x0936 (prescaler 2^10) and PMR=0x2191, so one frame is (8593+1)*1024 =
@@ -162,8 +170,142 @@ def _accelerated():
         return False
 
 
+# config.NotFound and device.DeviceError derive from SystemExit, so that a
+# command-line tool prints their message and exits. On this worker thread
+# that means the thread dies with nothing to show for it: `ready` is never
+# set, `error` stays None and the window sits on "loading snapshot" forever
+# (a windowed build has no stderr for the traceback either). Nothing on a
+# worker thread can exit the process anyway, so setup catches SystemExit as
+# well as Exception and reports it like any other failure.
+SETUP_ERRORS = (Exception, SystemExit)
+
+
+def describe_error(exc):
+    """-> 'Type: message' for the status line and the log."""
+    msg = str(exc).strip()
+    return '%s: %s' % (type(exc).__name__, msg) if msg else type(exc).__name__
+
+
+def saved_ssi0(path):
+    """-> the SSI0 entry of a snapshot's build manifest, or None.
+
+    A snapshot this window saved (save_on_exit) carries the audio model's
+    clock as a component AND a manifest entry for it. The legacy upgrade that
+    opens every older snapshot builds a manifest WITHOUT that entry and adds
+    it only after validation, so it would refuse such a snapshot as a
+    manifest mismatch -- and so would the retry without audio. Reading the
+    manifest first says which of the two builds the snapshot needs. Only the
+    manifest is looked at; anything unreadable is left for build() to report.
+    """
+    try:
+        with open(path, 'rb') as fh:
+            blob = _SnapshotUnpickler(fh).load()
+        entry = (blob.get('manifest') or {}).get('ssi0_dma')
+    except Exception:                                   # noqa: BLE001
+        return None
+    if isinstance(entry, dict) and isinstance(entry.get('request_hz'), int):
+        return dict(entry)
+    return None
+
+
+# What emu.snapshot says when a snapshot was made by a DIFFERENT build: its
+# build manifest (the hook topology, the flash and MAIN OS hashes) is not the
+# one this build would make, or it is in an older checkpoint format. Both are
+# refused before the machine is touched, and neither is a fault in the
+# snapshot or a reason to retry: the fix is to boot the firmware again and
+# make a new one. So they are reported as their own kind (Emulator.
+# incompatible), which the portable app turns into its Rebuild offer, rather
+# than as 'The emulator stopped', which reads as a crash and loses the card.
+INCOMPATIBLE_ERRORS = ('checkpoint build manifest mismatch',
+                       'unsupported checkpoint version')
+
+
+def snapshot_incompatible(exc):
+    """-> True when `exc` (or what it was raised from) refuses a snapshot
+    saved by a different build. See INCOMPATIBLE_ERRORS."""
+    for _ in range(8):              # a __cause__ chain, bounded
+        if exc is None:
+            break
+        if (isinstance(exc, RuntimeError)
+                and str(exc).startswith(INCOMPATIBLE_ERRORS)):
+            return True
+        exc = exc.__cause__
+    return False
+
+
+def manifest_diff(text):
+    """-> the build-manifest keys a mismatch message says differ, sorted.
+
+    emu.snapshot's message is 'checkpoint build manifest mismatch: saved=%r
+    current=%r'; both are dicts of plain literals, so they parse back. [] for
+    any other text, or when they do not.
+    """
+    _head, sep, rest = str(text).partition(': saved=')
+    saved_s, sep2, current_s = rest.rpartition(' current=')
+    if not (sep and sep2):
+        return []
+    try:
+        saved = ast.literal_eval(saved_s)
+        current = ast.literal_eval(current_s)
+    except Exception:                                   # noqa: BLE001
+        return []
+    if not isinstance(saved, dict) or not isinstance(current, dict):
+        return []
+    missing = object()
+    return sorted(str(k) for k in set(saved) | set(current)
+                  if saved.get(k, missing) != current.get(k, missing))
+
+
+def incompatible_message(snapshot, exc):
+    """-> Emulator.error for a snapshot another build made.
+
+    Leads with the verdict, because the panel's status line shows only the
+    first line; the full saved and current manifests go to the log instead.
+    """
+    name = os.path.basename(str(snapshot)) if snapshot else 'the snapshot'
+    text = str(exc)
+    keys = manifest_diff(text)
+    if keys:
+        detail = 'its build manifest differs in: %s' % ', '.join(keys)
+    else:
+        detail = text.split(': saved=')[0]
+    return ('incompatible snapshot: rebuild needed. %s was saved by a '
+            'different build of the emulator or firmware (%s), so this build '
+            'cannot resume it. Boot the firmware again to make a new one.'
+            % (name, detail))
+
+
+def _replace(src, dst):
+    """os.replace, retried while Windows reports a sharing violation.
+
+    A launcher or a virus scanner reading resume.snap at the moment of the
+    rename makes a bare os.replace fail with 'access denied', and the session
+    is then lost. emu.bootstrap.replace_retry retries that; it is imported
+    here, lazily, so this module does not depend on it being present.
+    """
+    try:
+        from emu.bootstrap import replace_retry
+    except ImportError:
+        return os.replace(src, dst)
+    return replace_retry(src, dst)
+
+
 class Emulator(threading.Thread):
-    """Runs the firmware and publishes a framebuffer. Owns no widgets."""
+    """Runs the firmware and publishes a framebuffer. Owns no widgets.
+
+    Failures are reported, never fatal to the window: `error` holds
+    'Type: message' when the snapshot could not be opened, the run halted
+    or the worker died, and `ready` is set in every case, so a UI waiting on
+    it cannot hang. `incompatible` is True when the failure was a snapshot
+    made by a different build (see INCOMPATIBLE_ERRORS): nothing is wrong
+    with it or the card, it just has to be made again.
+
+    save_on_exit: a path to save the machine to on a clean stop (stop_flag).
+    `finishing` is set once the run loop has ended at a step boundary and
+    the card flush and save have begun -- work a caller must wait for rather
+    than abandon on a timeout. `saved` is the path once it is written;
+    `save_error` says why it was not.
+    """
 
     daemon = True
 
@@ -171,9 +313,14 @@ class Emulator(threading.Thread):
                  fast=True, realtime=True, patch_machine=False,
                  patch_eighth=7, patch_machine_spec=None,
                  panel_dwell=PANEL_DWELL_MS, ips_at=(),
-                 post_intro_ips=4 * INSTR_PER_SEC, audio=True):
+                 post_intro_ips=4 * INSTR_PER_SEC, audio=True,
+                 save_on_exit=None):
         super().__init__()
         self.snapshot = snapshot
+        self.save_on_exit = save_on_exit
+        self.saved = None
+        self.save_error = None
+        self.finishing = threading.Event()
         # Record the audio output, for a device whose [audio] path is
         # modelled. See _start_audio.
         self.audio_wanted = audio
@@ -239,6 +386,7 @@ class Emulator(threading.Thread):
                       'source': 'setPixel', 'wall_ips': 0.0, 'real': 0.0}
         self._uc = None             # set once the machine is built
         self.error = None
+        self.incompatible = False   # error is a snapshot from another build
         self._seen = set()
         self.version = 0            # bumped on every pixel, so the UI can
         self._frame_t = time.time()  # skip redrawing an unchanged panel
@@ -285,8 +433,10 @@ class Emulator(threading.Thread):
             self.held = panelin.Held(self.device)
             self.button_names = panelin.control_names(m, profile, 'button')
             self.encoder_names = panelin.control_names(m, profile, 'encoder')
-        except Exception as exc:                       # noqa: BLE001
-            self.device_error = '%s: %s' % (type(exc).__name__, exc)
+        except SETUP_ERRORS as exc:                    # noqa: BLE001
+            # DeviceError and NotFound too (see SETUP_ERRORS): the machine is
+            # built by now, so this degrades to no control surface.
+            self.device_error = describe_error(exc)
 
     def _drain_input(self, m, profile, pc):
         """Apply queued panel input at a chunk boundary. -> the new PC.
@@ -376,6 +526,40 @@ class Emulator(threading.Thread):
         return new_pc
 
     def run(self):
+        """The thread body: _run, with nothing allowed to escape unreported.
+
+        _run catches its own setup failures. This is for the rest -- an
+        exception between setup and `ready`, or out of a hook inside the run
+        loop -- which used to end the thread with `ready` unset and no
+        message, a window that looked alive and never moved again.
+        """
+        try:
+            self._run()
+        except BaseException as exc:                    # noqa: BLE001
+            if self.error is None:
+                self.error = self._describe_failure(exc)
+            self.stats['status'] = ('crashed' if self.ready.is_set()
+                                    else 'failed to load')
+            print('[gui] EMULATOR STOPPED: %s' % self.error, flush=True)
+            traceback.print_exc(file=sys.stdout)
+            self._close_live()
+        finally:
+            self.ready.set()
+
+    def _describe_failure(self, exc):
+        """-> `error` for `exc`, flagging a snapshot from another build.
+
+        That one is worded as a verdict (incompatible_message) and sets
+        `incompatible`; the raw message, which holds both whole manifests,
+        goes to the log, where it says exactly what changed.
+        """
+        if snapshot_incompatible(exc):
+            self.incompatible = True
+            print('[gui] %s' % describe_error(exc), flush=True)
+            return incompatible_message(self.snapshot, exc)
+        return describe_error(exc)
+
+    def _run(self):
         def on_pixel(x, y, val, bmp):
             self.stats['bmp'] = bmp
             if (x, y) in self._seen and len(self._seen) > W * H // 2:
@@ -433,9 +617,17 @@ class Emulator(threading.Thread):
             # _identify_device needs the machine for the control-name tables
             # and so cannot run until after build() -- which is too late, as
             # unblock_except is an argument to build(). This only needs the
-            # firmware file, so it can run first. An unrecognised firmware is
-            # not fatal: it just keeps the default policy, the same way the
-            # control surface degrades rather than failing.
+            # firmware file, so it can run first. A failure to READ the device
+            # files keeps the default policy, the same way the control
+            # surface degrades rather than failing. A REFUSAL does not:
+            # device.identify raises DeviceError (a SystemExit) for a hash no
+            # device file lists or a missing devices directory, and NotFound
+            # for a missing .syx. Guessing the policy then either opens the
+            # snapshot under the wrong one -- a mk1 intro run the Digitakt II
+            # way wedges without a word -- or is refused as a manifest
+            # mismatch that names neither the firmware nor the fix. So those
+            # pass through to the handler below, which reports their own
+            # message; before SETUP_ERRORS they killed this thread silently.
             intro_except = ()
             try:
                 dev, _fw = devices.identify(config.firmware(self.syx))
@@ -459,16 +651,31 @@ class Emulator(threading.Thread):
             # and FF1; see patches/README.md): with it the render runs faster
             # than real time. Without it, fall back to recording at a slow
             # audio clock and playing afterwards.
-            cfg = getattr(dev, 'audio', None) if self.audio_wanted else None
+            # A snapshot saved on exit (save_on_exit) already carries the
+            # audio model -- see saved_ssi0 -- so it is resumed as saved, at
+            # the rate it was saved with, rather than legacy-upgraded. The
+            # model is then part of the snapshot's topology and cannot be
+            # left out: without audio it is still built, just kept silent.
+            saved_ssi = saved_ssi0(self.snapshot)
+            cfg = getattr(dev, 'audio', None)
+            if not self.audio_wanted:
+                if saved_ssi and cfg:
+                    self.audio_muted = True
+                else:
+                    cfg = None
             audio_kw = {}
             if cfg:
                 self.audio_live = _accelerated()
                 hz = cfg['request_hz']
                 if not self.audio_live and cfg['fallback_request_hz']:
                     hz = cfg['fallback_request_hz']
-                audio_kw = dict(ssi0_request_hz=hz,
-                                ssi0_legacy_upgrade=True,
-                                ssi0_profile=cfg['ssi_profile'])
+                if saved_ssi:
+                    audio_kw = dict(ssi0_request_hz=saved_ssi['request_hz'],
+                                    ssi0_profile=cfg['ssi_profile'])
+                else:
+                    audio_kw = dict(ssi0_request_hz=hz,
+                                    ssi0_legacy_upgrade=True,
+                                    ssi0_profile=cfg['ssi_profile'])
 
             def _build(**kw):
                 # fast_idle: an idle spin ends the step and is credited as
@@ -485,7 +692,13 @@ class Emulator(threading.Thread):
             try:
                 m, ev, st, pc, inq, at = _build(**audio_kw)
             except RuntimeError as exc:
-                if not audio_kw:
+                # A snapshot that carries the audio model cannot open
+                # without it: retrying would only replace the real reason
+                # with a manifest mismatch. And a snapshot from another build
+                # is refused before audio is looked at -- the legacy upgrade
+                # adds its manifest entry only after validation -- so the
+                # retry would be refused the same way, a second build later.
+                if not audio_kw or saved_ssi or snapshot_incompatible(exc):
                     raise
                 self.audio_error = str(exc)
                 print('[gui] audio unavailable for this snapshot (%s); '
@@ -547,8 +760,8 @@ class Emulator(threading.Thread):
             self.fb_front = profile.fb_front
             self.profile = profile
             self._identify_device(m, profile)
-        except Exception as exc:                       # noqa: BLE001
-            self.error = '%s: %s' % (type(exc).__name__, exc)
+        except SETUP_ERRORS as exc:                    # noqa: BLE001
+            self.error = self._describe_failure(exc)
             self.stats['status'] = 'failed to load'
             print('[gui] FAILED TO LOAD: %s' % self.error, flush=True)
             self.ready.set()
@@ -791,6 +1004,13 @@ class Emulator(threading.Thread):
                 total = self.stats['instrs'] + executed
                 print('[gui] HALTED: %s  at pc=0x%08x after %dM instr'
                       % (stop, pc, total // 1_000_000), flush=True)
+                # And to `error`, so a window shows it and a caller can
+                # tell a halt from a clean stop. The card is deliberately
+                # NOT flushed and nothing is saved: the last saved session
+                # and the image file still agree, which a half-run one
+                # would not.
+                self.error = ('halted: %s at pc=0x%08x after %dM instructions'
+                              % (stop, pc, total // 1_000_000))
                 break
             self.stats['instrs'] += executed
             now = time.time()
@@ -836,21 +1056,91 @@ class Emulator(threading.Thread):
                 except UcError:
                     pass
         else:
+            self.finishing.set()
             self.stats['status'] = 'stopped'
             # The card's writes reach its image file only at flush; a stop is
             # the last chance before the process exits.
+            flushed = False
             try:
                 esd = ev.get('esdhc')
                 if esd is not None:
                     esd.card.flush()
+                flushed = True
             except Exception as exc:                       # noqa: BLE001
                 print('[gui] +Drive image flush failed: %s' % exc, flush=True)
+                self.save_error = '+Drive image flush failed: %s' % exc
+            # Only after a good flush: a snapshot is half of a pair with the
+            # card file, and saving one the file does not match is exactly
+            # the stale pairing save_on_exit exists to prevent.
+            if self.save_on_exit and flushed:
+                self._save_session(m, ev, st, pits)
         self._close_live()
         n_seen = len(m.fault_pages)
         n_kept = len(m.faults)
         capped = ' (truncated at max_fault_records)' if n_kept < n_seen else ''
         print('[gui] faults: %d distinct pages touched, %d records kept%s'
               % (n_seen, n_kept, capped), flush=True)
+
+    def _save_session(self, m, ev, st, pits):
+        """Save the stopped machine to save_on_exit, atomically. -> bool.
+
+        Why at all: the firmware's mount state and its inode and bitmap
+        caches live in RAM, the card's contents in the image file. Opening
+        the old snapshot on top of a card this session wrote pairs stale
+        caches with newer contents. Saving the RAM that matches the flushed
+        card keeps the two together.
+
+        The same save tools/introboot.py and tools/uisettle.py make, from
+        the same build(), so it reopens here under the same manifest: the
+        timers are claimed as a component, and ev['tasks'] -- a list of
+        (entry, prio, tcb) -- becomes the TCB-keyed map restore_into reads,
+        merged with the tasks the opened snapshot already carried.
+
+        Written to PATH.tmp and renamed over PATH, so a failure part way
+        leaves the previous session's snapshot intact rather than a torn
+        one; the rename is retried while Windows reports PATH in use (see
+        _replace). Runs on this thread, at a step boundary, after the run
+        loop.
+
+        The card is not in it: for a file-backed card the esdhc component
+        stores an empty overlay and no erased ranges (Esdhc.
+        checkpoint_state), because the flushed file already holds them and a
+        resume.snap that carried them would replay them over the card on
+        every launch. tests/test_panel_app.py checks that on a saved blob.
+        """
+        path = self.save_on_exit
+        tmp = path + '.tmp'
+        self.stats['status'] = 'saving'
+        try:
+            components = ev['checkpoint_components']
+            if components.get('timers') is not pits:
+                ev['claim_checkpoint_component']('timers', pits)
+            tasks = {'%#010x' % tcb: info
+                     for tcb, info in st.get('task_create_hits', {}).items()}
+            tasks.update(('%#010x' % tcb,
+                          {'entry': entry, 'prio': prio, 'tcb': tcb})
+                         for entry, prio, tcb in ev.get('tasks', []))
+            extra = {'n': st.get('n', 0) + self.stats['instrs'],
+                     'tasks': tasks,
+                     'note': 'saved on exit by emu.gui'}
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            save_snapshot(m, tmp, extra=extra, components=components,
+                          manifest=ev.get('checkpoint_manifest'))
+            _replace(tmp, path)
+        except Exception as exc:                        # noqa: BLE001
+            self.save_error = describe_error(exc)
+            self.stats['status'] = 'save failed'
+            print('[gui] session NOT saved to %s: %s' % (path, self.save_error),
+                  flush=True)
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return False
+        self.saved = path
+        self.stats['status'] = 'saved'
+        print('[gui] session saved to %s' % path, flush=True)
+        return True
 
     def _start_leds(self, m, ev):
         """Start decoding the panel-MCU stream, seeded from the firmware's RAM.
