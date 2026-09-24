@@ -349,6 +349,10 @@ class Emulator(threading.Thread):
         self._live_error = None
         self._live_started = False
         self._live_buf = bytearray()
+        # Master Volume knob position (software gain on live output). 1.0
+        # = unity; 0.0 = silent; the knob goes a bit above unity if turned
+        # past 12 o'clock, with clipping at the host device.
+        self._volume = 1.0
         self.weakptr = weakptr
         self.slc = slc
         self.syx = syx
@@ -1273,6 +1277,7 @@ class Emulator(threading.Thread):
                 self._live_error = str(exc)
                 print('[gui] live audio unavailable: %s' % exc, flush=True)
                 return
+            out.gain = self._volume
         if self._live_started and out.queued() == 0:
             # Ran dry (the emulator fell behind): build the cushion again
             # rather than dribbling out block by block.
@@ -1292,6 +1297,12 @@ class Emulator(threading.Thread):
         self.audio_muted = bool(muted)
         self._live_started = False
         del self._live_buf[:]
+
+    def set_volume(self, gain):
+        """Software gain on the live output (Master Volume knob)."""
+        self._volume = max(0.0, float(gain))
+        if self._live_out is not None:
+            self._live_out.gain = self._volume
 
     def live_latency_ms(self):
         out = self._live_out

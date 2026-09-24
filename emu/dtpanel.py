@@ -116,49 +116,55 @@ def _luma(rgb):
 
 # Firmware label -> (x, y, w, h, secondary caption, tint).
 BUTTONS = {
-    # right-hand page column
-    'TRIG': (1052, 96, 92, 42, 'Quantize', None),
-    'SRC': (1052, 156, 92, 42, 'Assign', None),
-    'FLTR': (1052, 216, 92, 42, 'Fltr Setup', None),
-    'AMP': (1052, 276, 92, 42, 'Amp Env', None),
-    'LFO': (1052, 336, 92, 42, 'LFO Setup', None),
-    'PAGE': (1052, 410, 92, 38, None, None),
-    # left function column
-    'FUNC': (30, 406, 88, 40, None, AMBER),
-    'BANK': (30, 462, 88, 40, 'Mute Mode', None),
-    'PTN': (30, 518, 88, 40, 'Pattern Settings', None),
-    'TRK': (30, 574, 88, 40, 'Track Settings', None),
-    # menu row
-    # The key the panel-test table calls PATTERN MENU is SONG on OS 1.5x:
-    # held, the firmware shows "SONG MODE OFF". Named for what it does.
-    'SONG': (150, 406, 104, 40, None, None),
-    'GLOBAL': (264, 406, 92, 40, None, None),
-    'SAMPLE': (366, 406, 92, 40, None, None),
-    'TEMPO': (468, 406, 92, 40, None, None),
-    # transport
-    'STOP': (150, 470, 76, 46, None, None),
-    'PLAY': (236, 470, 76, 46, None, PLAY_C),
-    'RECORD': (322, 470, 76, 46, None, REC_C),
-    # confirm and cursor
-    'YES': (430, 470, 76, 46, 'Reload', None),
-    'NO': (516, 470, 76, 46, 'tTime', None),
-    'UP': (664, 464, 56, 40, None, None),
-    'LEFT': (604, 510, 56, 40, None, None),
-    'DOWN': (664, 510, 56, 40, None, None),
-    'RIGHT': (724, 510, 56, 40, None, None),
-    # The encoder PUSH switches. The firmware gives these their own button
-    # codes (40..48) in the same table as everything else, but physically
-    # they are the knobs above them, so they sit directly under each one and
-    # double as its label rather than being exiled to an overflow row.
-    'A': (596, 190, 48, 18, None, None),
-    'B': (700, 190, 48, 18, None, None),
-    'C': (804, 190, 48, 18, None, None),
-    'D': (908, 190, 48, 18, None, None),
-    'E': (596, 312, 48, 18, None, None),
-    'F': (700, 312, 48, 18, None, None),
-    'G': (804, 312, 48, 18, None, None),
-    'H': (908, 312, 48, 18, None, None),
-    'LEVEL/DATA': (1016, 538, 72, 18, None, None),
+    # LEFT column: FUNC on top (yellow modifier), then BANK, PTN, TRK
+    # vertically. The 100px width leaves room for the secondary caption
+    # below each label.
+    'FUNC': (30, 400, 100, 40, None, AMBER),
+    'BANK': (30, 460, 100, 40, 'Mute Mode', None),
+    'PTN': (30, 540, 100, 40, 'Pattern Settings', None),
+    'TRK': (30, 620, 100, 40, 'Track Settings', None),
+    # Function menu row at y=400. 10 items in one row:
+    # SONG / GLOBAL / SAMPLE / TEMPO (the four firmware menu items) and
+    # TRIG / SRC / FLTR / AMP / LFO (the five page buttons), with PAGE at
+    # the far right. 92 wide each, 8px gaps.
+    'SONG': (140, 400, 92, 40, None, None),
+    'GLOBAL': (240, 400, 92, 40, None, None),
+    'SAMPLE': (340, 400, 92, 40, None, None),
+    'TEMPO': (440, 400, 92, 40, None, None),
+    'TRIG': (540, 400, 92, 40, 'Quantize', None),
+    'SRC': (640, 400, 92, 40, 'Assign', None),
+    'FLTR': (740, 400, 92, 40, 'Fltr Setup', None),
+    'AMP': (840, 400, 92, 40, 'Amp Env', None),
+    'LFO': (940, 400, 92, 40, 'LFO Setup', None),
+    'PAGE': (1040, 400, 92, 40, None, None),
+    # transport (under the function menu row, left half)
+    'STOP': (150, 460, 76, 46, None, None),
+    'PLAY': (236, 460, 76, 46, None, PLAY_C),
+    'RECORD': (322, 460, 76, 46, None, REC_C),
+    # confirm (stacked vertically, to the right of the transport cluster)
+    'YES': (600, 460, 76, 46, 'Reload', None),
+    'NO': (600, 510, 76, 46, 'tTime', None),
+    # cursor arrows: UP aligned with the transport row; LEFT/DOWN/RIGHT in
+    # a row below it (a +/- cross shape). The cluster sits over trig key 7
+    # (DOWN centered at x=847 = trig 7's center), with LEFT over trig 6
+    # and RIGHT over trig 8.
+    'UP': (819, 464, 56, 40, None, None),
+    'LEFT': (763, 510, 56, 40, None, None),
+    'DOWN': (819, 510, 56, 40, None, None),
+    'RIGHT': (875, 510, 56, 40, None, None),
+    # The encoder PUSH switches. Shifted right by 130 with the encoders so
+    # they sit under each one and double as its label rather than being
+    # exiled to an overflow row.
+    'A': (726, 190, 48, 18, None, None),
+    'B': (830, 190, 48, 18, None, None),
+    'C': (934, 190, 48, 18, None, None),
+    'D': (1038, 190, 48, 18, None, None),
+    'E': (726, 312, 48, 18, None, None),
+    'F': (830, 312, 48, 18, None, None),
+    'G': (934, 312, 48, 18, None, None),
+    'H': (1038, 312, 48, 18, None, None),
+    # LEVEL/DATA push: under the top-left Level/Data knob.
+    'LEVEL/DATA': (54, 312, 72, 18, 'Sound Browser', None),
 }
 # sixteen trig keys, two rows of eight
 for _i in range(16):
@@ -166,13 +172,21 @@ for _i in range(16):
                             98, 72, None, None)
 
 # Firmware label -> (centre x, centre y, radius).
+# Shifted right by 130 (same shift as the screen) so the encoder area sits
+# clear of the Master Volume and Level/Data knobs at the top-left.
 ENCODERS = {
-    'A': (620, 150, 34), 'B': (724, 150, 34),
-    'C': (828, 150, 34), 'D': (932, 150, 34),
-    'E': (620, 272, 34), 'F': (724, 272, 34),
-    'G': (828, 272, 34), 'H': (932, 272, 34),
-    'LEVEL/DATA': (1052, 500, 30),
+    'A': (750, 150, 34), 'B': (854, 150, 34),
+    'C': (958, 150, 34), 'D': (1062, 150, 34),
+    'E': (750, 272, 34), 'F': (854, 272, 34),
+    'G': (958, 272, 34), 'H': (1062, 272, 34),
+    # Top-left, under Master Volume. Slightly smaller than the A-H knobs.
+    'LEVEL/DATA': (90, 280, 28),
 }
+
+# Master Volume: top-left decorative knob. The hardware's volume pot is
+# analog (not in the firmware's code table), so the emulator can't drive it;
+# the panel still draws it so the top-left matches the real hardware.
+MASTER_VOLUME = (90, 195, 36)
 
 
 PANEL_W, PANEL_H = 1160, 790      # the drawn control surface
@@ -197,6 +211,7 @@ class DigitaktPanel(tk.Tk):
     BUTTONS = BUTTONS
     ENCODERS = ENCODERS
     PANEL_W, PANEL_H = PANEL_W, PANEL_H
+    SCREEN_X, SCREEN_Y = 168, 102        # Shifted right by 130px for Digitakt
     SAMPLES = True                       # the LOAD SAMPLES button
 
     def __init__(self, snapshot, syx=None, audio=True, save_on_exit=None,
@@ -297,15 +312,16 @@ class DigitaktPanel(tk.Tk):
                       font=('Helvetica', 20, 'bold'), anchor='w')
         c.create_text(48, 60, text=self.SUBTITLE, fill=DIM,
                       font=('Helvetica', 9), anchor='w')
-        self._rr(24, 88, W * SCALE + 28, H * SCALE + 28, 8,
+        sx, sy = self.SCREEN_X, self.SCREEN_Y
+        self._rr(sx - 14, 88, W * SCALE + 28, H * SCALE + 28, 8,
                  fill='#05070a', outline='#39414d')
-        c.create_image(SCREEN_X, SCREEN_Y, image=self.big, anchor='nw')
+        c.create_image(sx, sy, image=self.big, anchor='nw')
         # Covers the screen when the emulator fails; see _show_failure.
         self.err_box = c.create_rectangle(
-            SCREEN_X, SCREEN_Y, SCREEN_X + W * SCALE, SCREEN_Y + H * SCALE,
+            sx, sy, sx + W * SCALE, sy + H * SCALE,
             fill='#05070a', outline='', state='hidden')
         self.err_text = c.create_text(
-            SCREEN_X + 14, SCREEN_Y + 14, text='', fill=ERR,
+            sx + 14, sy + 14, text='', fill=ERR,
             font=('Helvetica', 10), anchor='nw', width=W * SCALE - 28,
             state='hidden')
         self.status = c.create_text(24, 768, text='booting...', fill=DIM,
@@ -346,6 +362,40 @@ class DigitaktPanel(tk.Tk):
                             font=('Helvetica', 9, 'bold'))
         for item in (rect, txt):
             c.tag_bind(item, '<Button-1>', lambda _e: self.load_samples())
+
+        # Master Volume: top-left, interactive knob. The hardware's
+        # volume pot is analog (not in the firmware's code table), so the
+        # emulator applies the knob position as a software gain before
+        # the samples reach the host device.
+        mv_x, mv_y, mv_r = MASTER_VOLUME
+        self._mv_oval = c.create_oval(
+            mv_x - mv_r, mv_y - mv_r, mv_x + mv_r, mv_y + mv_r,
+            fill='#171b21', outline='#3c444f', width=2)
+        # Indicator line (stored so it can be redrawn as the knob turns).
+        self._mv_mark = c.create_line(
+            mv_x, mv_y - mv_r + 6, mv_x, mv_y - 4,
+            fill=TEXT, width=3)
+        c.create_text(mv_x, mv_y + mv_r + 11, text='Master Volume',
+                      fill=DIM, font=('Helvetica', 8))
+        # 0.0 (silent) to 1.0 (unity); the knob goes a bit past unity with
+        # clipping at the host.
+        self._mv_value = 1.0
+        self._paint_master_volume()
+        for item in (self._mv_oval, self._mv_mark):
+            try:
+                c.tag_bind(item, '<MouseWheel>',
+                           lambda e: self._turn_master_volume(
+                               1 if e.delta > 0 else -1, e))
+            except tk.TclError:
+                pass
+            c.tag_bind(item, '<Button-4>',
+                       lambda e: self._turn_master_volume(1, e))
+            c.tag_bind(item, '<Button-5>',
+                       lambda e: self._turn_master_volume(-1, e))
+            c.tag_bind(item, '<ButtonPress-1>',
+                       lambda e: self._mv_drag_start(e))
+            c.tag_bind(item, '<B1-Motion>',
+                       lambda e: self._mv_drag(e))
 
     def _note(self, msg, secs=4.0):
         self._audio_note = (msg, time.time() + secs)
@@ -509,7 +559,9 @@ class DigitaktPanel(tk.Tk):
                        (getattr(dev, 'leds', None) or {}).items()}
         page = self.BUTTONS['PAGE']
         for i, led in enumerate(getattr(dev, 'page_leds', ()) or ()):
-            cx, cy = page[0] + 13 + i * 22, page[1] + page[3] + 12
+            # The 1/4..4/4 dots sit just above PAGE (not below, as before):
+            # the picture places them there, with PAGE under them.
+            cx, cy = page[0] + 13 + i * 22, page[1] - 12
             dot = c.create_oval(cx - 5, cy - 5, cx + 5, cy + 5,
                                 fill=LED_OFF, outline=EDGE)
             self.page_items.append((led, dot))
@@ -613,6 +665,49 @@ class DigitaktPanel(tk.Tk):
                            cy + math.sin(a) * (r - 22),
                            cx + math.cos(a) * (r - 6),
                            cy + math.sin(a) * (r - 6))
+
+    # ------------------------------------------------------ Master Volume knob
+    # The hardware's volume pot is analog (not in the firmware's code
+    # table), so the knob is purely a panel-side control. Turning it applies
+    # a software gain to the live output (and to SAVE WAV).
+    _MV_STEP = 1.0 / 20        # 20 wheel clicks cover the full range
+    _MV_MAX = 1.5              # can push a little past unity; clipped at host
+
+    def _paint_master_volume(self):
+        """Redraw the knob's indicator line for the current value."""
+        mv_x, mv_y, mv_r = MASTER_VOLUME
+        # Indicator sweeps from 7 o'clock (silent) clockwise to 5 o'clock
+        # (max). Range = 300 degrees = 5*pi/3.
+        angle = -5 * math.pi / 6 + self._mv_value * (5 * math.pi / 3)
+        a = angle - math.pi / 2
+        self.canvas.coords(
+            self._mv_mark,
+            mv_x + math.cos(a) * (mv_r - 22),
+            mv_y + math.sin(a) * (mv_r - 22),
+            mv_x + math.cos(a) * (mv_r - 6),
+            mv_y + math.sin(a) * (mv_r - 6))
+
+    def _turn_master_volume(self, step, event=None):
+        if event is not None and event.state & 0x0001:
+            step *= 10
+        self._mv_value = max(0.0, min(self._MV_MAX,
+                                      self._mv_value + step * self._MV_STEP))
+        self._paint_master_volume()
+        self.emu.set_volume(self._mv_value)
+
+    def _mv_drag_start(self, event):
+        self._mv_drag_y = event.y
+        self._mv_drag_acc = 0.0
+
+    def _mv_drag(self, event):
+        """Vertical drag on the knob: up turns it up, 6px per step."""
+        dy = getattr(self, '_mv_drag_y', event.y) - event.y
+        self._mv_drag_y = event.y
+        self._mv_drag_acc = getattr(self, '_mv_drag_acc', 0.0) + dy / 6.0
+        step = int(self._mv_drag_acc)
+        if step:
+            self._mv_drag_acc -= step
+            self._turn_master_volume(step)
 
     def _led_rgb(self, led):
         """The LED's colour, or None when it is dark (or not defined yet)."""

@@ -98,6 +98,7 @@ import contextlib
 import dataclasses
 import datetime
 import faulthandler
+import glob
 import hashlib
 import json
 import os
@@ -394,11 +395,56 @@ def _dtpanel():
     return _panel_module('emu.dtpanel')
 
 
+def _ensure_tk_env(target=None):
+    """When running from source in a virtualenv (e.g. uv managed Python on macOS),
+    Tcl and Tk libraries reside in sys.base_prefix rather than the virtualenv.
+    Without TCL_LIBRARY/TK_LIBRARY set, background child processes (spawned with
+    stdin=DEVNULL) fail to locate init.tcl. Locate and export them if not already set,
+    and symlink them into the virtualenv's lib directory if writable."""
+    if is_frozen():
+        return
+    if target is None:
+        target = os.environ
+    if not target.get('TCL_LIBRARY') or not os.path.isdir(target['TCL_LIBRARY']):
+        for prefix in (sys.base_prefix, sys.prefix):
+            cands = sorted(glob.glob(os.path.join(prefix, 'lib', 'tcl8.*')) +
+                           glob.glob(os.path.join(prefix, 'lib', 'tcl9.*')), reverse=True)
+            for c in cands:
+                if os.path.isfile(os.path.join(c, 'init.tcl')):
+                    target['TCL_LIBRARY'] = c
+                    break
+            if target.get('TCL_LIBRARY'):
+                break
+    if not target.get('TK_LIBRARY') or not os.path.isdir(target['TK_LIBRARY']):
+        for prefix in (sys.base_prefix, sys.prefix):
+            cands = sorted(glob.glob(os.path.join(prefix, 'lib', 'tk8.*')) +
+                           glob.glob(os.path.join(prefix, 'lib', 'tk9.*')), reverse=True)
+            for c in cands:
+                if os.path.isfile(os.path.join(c, 'tk.tcl')):
+                    target['TK_LIBRARY'] = c
+                    break
+            if target.get('TK_LIBRARY'):
+                break
+    if sys.prefix != sys.base_prefix:
+        venv_lib = os.path.join(sys.prefix, 'lib')
+        if os.path.isdir(venv_lib):
+            for var in ('TCL_LIBRARY', 'TK_LIBRARY'):
+                src = target.get(var)
+                if src and os.path.isdir(src):
+                    dst = os.path.join(venv_lib, os.path.basename(src))
+                    if not os.path.exists(dst):
+                        try:
+                            os.symlink(src, dst)
+                        except OSError:
+                            pass
+
+
 def _ensure_import_path():
     """Workers chdir into the firmware folder; from source, keep the repo
     importable for the lazy imports that follow."""
     if not is_frozen() and REPO not in sys.path:
         sys.path.insert(0, REPO)
+    _ensure_tk_env()
 
 
 # --- one firmware folder -------------------------------------------------------
@@ -463,6 +509,7 @@ def child_env(base=None):
     else:
         rest = env.get('PYTHONPATH')
         env['PYTHONPATH'] = REPO + (os.pathsep + rest if rest else '')
+        _ensure_tk_env(env)
     return env
 
 

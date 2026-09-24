@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import array
 import ctypes
+import ctypes.util
 import struct
 import sys
 import threading
@@ -88,13 +89,14 @@ _WaveHdr._fields_ = [('lpData', ctypes.c_void_p),
                      ('reserved', ctypes.c_size_t)]
 
 
-class WaveOut:
+class _WinMMOut:
     """Queue 16-bit stereo PCM to the default Windows output device."""
 
     def __init__(self, rate=48000, channels=2, buffers=16, block_ms=20):
         if sys.platform != 'win32':
             raise OSError('WaveOut needs Windows')
         self.rate, self.channels = rate, channels
+        self.gain = 1.0
         self.frame = 2 * channels
         self.block = max(self.frame,
                          rate * block_ms // 1000 * self.frame)
@@ -138,6 +140,7 @@ class WaveOut:
         never stall the caller). block=True waits for a free buffer instead
         (playing a finished recording), until `abort()` says to give up.
         """
+        pcm = apply_gain(pcm, self.gain)
         self._pending += pcm
         while len(self._pending) >= self.block:
             if not self._submit(bytes(self._pending[:self.block]),
@@ -190,11 +193,179 @@ class WaveOut:
         self._handle = None
 
 
+class _AudioStreamBasicDescription(ctypes.Structure):
+    _fields_ = [
+        ('mSampleRate', ctypes.c_double),
+        ('mFormatID', ctypes.c_uint32),
+        ('mFormatFlags', ctypes.c_uint32),
+        ('mBytesPerPacket', ctypes.c_uint32),
+        ('mFramesPerPacket', ctypes.c_uint32),
+        ('mBytesPerFrame', ctypes.c_uint32),
+        ('mChannelsPerFrame', ctypes.c_uint32),
+        ('mBitsPerChannel', ctypes.c_uint32),
+        ('mReserved', ctypes.c_uint32),
+    ]
+
+
+class _AudioQueueBuffer(ctypes.Structure):
+    _fields_ = [
+        ('mAudioDataBytesCapacity', ctypes.c_uint32),
+        ('mAudioData', ctypes.c_void_p),
+        ('mAudioDataByteSize', ctypes.c_uint32),
+        ('mUserData', ctypes.c_void_p),
+        ('mPacketDescriptionCapacity', ctypes.c_uint32),
+        ('mPacketDescriptions', ctypes.c_void_p),
+        ('mPacketDescriptionCount', ctypes.c_uint32),
+    ]
+
+
+class _AudioQueueOut:
+    """Queue 16-bit stereo PCM to the default macOS output device via AudioQueue."""
+
+    def __init__(self, rate=48000, channels=2, buffers=16, block_ms=20):
+        path = ctypes.util.find_library('AudioToolbox') or (
+            '/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox'
+        )
+        try:
+            self._lib = ctypes.CDLL(path)
+        except OSError as exc:
+            raise OSError('cannot load AudioToolbox: %s' % exc) from exc
+
+        self.rate, self.channels = rate, channels
+        self.frame = 2 * channels
+        self.block = max(self.frame, rate * block_ms // 1000 * self.frame)
+        self.buffers = buffers
+        self.dropped = 0
+        self.played = 0
+        self.gain = 1.0
+        self._pending = bytearray()
+        self._started = False
+        self._lock = threading.Lock()
+
+        fmt = _AudioStreamBasicDescription(
+            float(rate), 0x6c70636d, (1 << 2), self.frame, 1, self.frame, channels, 16, 0
+        )
+        self._cb_type = ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(_AudioQueueBuffer)
+        )
+        self._cb = self._cb_type(self._on_buffer_done)
+        self._aq = ctypes.c_void_p()
+        err = self._lib.AudioQueueNewOutput(
+            ctypes.byref(fmt), self._cb, None, None, None, 0, ctypes.byref(self._aq)
+        )
+        if err != 0:
+            raise OSError('AudioQueueNewOutput failed: %d' % err)
+
+        self._bufs = []
+        self._buf_map = {}
+        self._free_indices = []
+        for i in range(buffers):
+            buf = ctypes.POINTER(_AudioQueueBuffer)()
+            err = self._lib.AudioQueueAllocateBuffer(self._aq, self.block, ctypes.byref(buf))
+            if err != 0:
+                self.close()
+                raise OSError('AudioQueueAllocateBuffer failed: %d' % err)
+            self._bufs.append(buf)
+            self._buf_map[ctypes.addressof(buf.contents)] = i
+            self._free_indices.append(i)
+
+    def _on_buffer_done(self, user_data, aq, buf_ptr):
+        addr = ctypes.addressof(buf_ptr.contents)
+        idx = self._buf_map.get(addr)
+        if idx is not None:
+            with self._lock:
+                self._free_indices.append(idx)
+
+    def queued(self):
+        """Blocks handed to the device and not yet played."""
+        with self._lock:
+            if not hasattr(self, '_bufs') or not self._bufs:
+                return 0
+            return len(self._bufs) - len(self._free_indices)
+
+    def _free(self):
+        with self._lock:
+            if self._free_indices:
+                return self._free_indices.pop(0)
+            return None
+
+    def write(self, pcm, block=False, abort=None):
+        """Append 16-bit LE PCM; full blocks go to the device at once."""
+        pcm = apply_gain(pcm, self.gain)
+        self._pending += pcm
+        while len(self._pending) >= self.block:
+            if not self._submit(bytes(self._pending[:self.block]), block, abort):
+                return
+            del self._pending[:self.block]
+
+    def _submit(self, chunk, block, abort):
+        """Queue one full block. -> False if abandoned (abort)."""
+        if not hasattr(self, '_aq') or self._aq is None:
+            return False
+        i = self._free()
+        while i is None and block:
+            if abort is not None and abort():
+                return False
+            time.sleep(0.002)
+            i = self._free()
+        if i is None:
+            self.dropped += 1
+            return True
+        buf = self._bufs[i]
+        ctypes.memmove(buf.contents.mAudioData, chunk, self.block)
+        buf.contents.mAudioDataByteSize = self.block
+        err = self._lib.AudioQueueEnqueueBuffer(self._aq, buf, 0, None)
+        if err != 0:
+            self.dropped += 1
+            with self._lock:
+                self._free_indices.append(i)
+            return True
+        if not self._started:
+            self._lib.AudioQueueStart(self._aq, None)
+            self._started = True
+        self.played += 1
+        return True
+
+    def drain(self, abort=None):
+        """Send any partial block, then wait until everything has played."""
+        if self._pending:
+            tail = bytes(self._pending).ljust(self.block, b'\0')
+            self._pending = bytearray()
+            self._submit(tail, True, abort)
+        while self.queued():
+            if abort is not None and abort():
+                return
+            time.sleep(0.005)
+
+    def close(self):
+        if not hasattr(self, '_aq') or self._aq is None:
+            return
+        aq = self._aq
+        self._aq = None
+        try:
+            self._lib.AudioQueueStop(aq, True)
+            self._lib.AudioQueueDispose(aq, True)
+        except Exception:
+            pass
+
+
+class WaveOut:
+    """Queue 16-bit stereo PCM to the default host output device."""
+
+    def __new__(cls, rate=48000, channels=2, buffers=16, block_ms=20):
+        if sys.platform == 'win32':
+            return _WinMMOut(rate, channels, buffers, block_ms)
+        if sys.platform == 'darwin':
+            return _AudioQueueOut(rate, channels, buffers, block_ms)
+        raise OSError('WaveOut needs Windows or macOS')
+
+
 class WavFile:
     """The same interface, recording to a .wav file instead."""
 
     def __init__(self, path, rate=48000, channels=2):
         self.rate, self.channels = rate, channels
+        self.gain = 1.0
         self.dropped = 0
         self.played = 0
         self._w = wave.open(path, 'wb')
@@ -206,6 +377,7 @@ class WavFile:
         return 0
 
     def write(self, pcm):
+        pcm = apply_gain(pcm, self.gain)
         self._w.writeframes(pcm)
         self.played += 1
 
@@ -246,6 +418,28 @@ def write_wav(path, pcm, rate=48000, channels=2):
         w.setsampwidth(2)
         w.setframerate(rate)
         w.writeframes(pcm)
+
+
+def apply_gain(pcm, gain):
+    """Multiply 16-bit LE PCM by `gain`, clipping to int16 range.
+
+    Used by the panel's Master Volume knob: the hardware's volume pot is
+    analog (not in the firmware's code table), so the emulator applies the
+    knob position as a software gain before the samples reach the host
+    audio device.
+    """
+    if gain == 1.0 or not pcm:
+        return pcm
+    samples = array.array('h')
+    samples.frombytes(pcm)
+    if sys.byteorder == 'big':
+        samples.byteswap()
+    # Promote to int32 so a gain > 1.0 doesn't overflow before clipping.
+    out = array.array('h', (max(-32768, min(32767, int(s * gain)))
+                              for s in samples))
+    if sys.byteorder == 'big':
+        out.byteswap()
+    return out.tobytes()
 
 
 class Player:
