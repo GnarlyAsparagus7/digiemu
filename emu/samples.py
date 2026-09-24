@@ -26,8 +26,9 @@ FUN_400e8606 compares case-insensitively and skips the character after a
 number, so 'Kick1a' equals 'KICK1b' -- gets '-2', '-3', ... instead.
 
 The sample rate is kept, as ekfsadd keeps it: the header has a field for it
-and the engine computes the pitch ratio from it (only 48 kHz has been
-confirmed by ear; see HANDOFF-2026-09-22.md).
+and the engine computes the pitch ratio from it. Only a 48 kHz sample's
+rendered output has been checked against its source so far (see
+docs/history/HANDOFF-2026-09-23.md).
 """
 import os
 from dataclasses import dataclass, field

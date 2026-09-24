@@ -1,152 +1,183 @@
-# Digitakt (mk1) emulator, derived from digikit
+# digiemu — a Digitakt mk1 emulator
 
-An emulator for the Elektron Digitakt (mk1), OS 1.53. The ColdFire control
-processor boots to its live user interface, plays audio at 48 kHz in real
-time, runs patterns, and loads samples from an emulated +Drive, all driven
-from a clickable front panel. Not affiliated with or endorsed by Elektron.
+digiemu runs the Elektron Digitakt (mk1)'s own firmware on a PC. An emulated
+ColdFire CPU boots the real operating system to its live user interface, and
+a clickable front panel plays it: the screen, every key and encoder with the
+key LEDs, the sequencer, the +Drive, and live 48 kHz audio.
 
-Derived from [m-dwyer/digikit](https://github.com/m-dwyer/digikit)
-(GPL-2.0-or-later) at upstream commit `a5643ba`, published as one snapshot
-rather than with its history.
+You bring the firmware. digiemu contains none of Elektron's code, and it is
+not affiliated with or endorsed by Elektron.
 
-**Not included:** Elektron firmware (you supply your own `.syx`), anything
-extracted from it (sections, snapshots, card images), and any tooling for
-building, signing or patching firmware images.
 
-Upstream targets Digitakt II and Digitone II. Those paths still work: every
-mk1 behaviour is selected by the device file (`devices/digitakt.toml`), and a
-device that says nothing keeps upstream's behaviour.
+## Quick start (Windows)
 
-Target firmware: **Digitakt mk1 OS 1.53**, SHA-256
-`9bdd44bb6102fb25c143cfab97bc92b7a89c463f795d3112dce89771e29bcc92`.
+1. Download `digiemu-win64-<version>.zip` from
+   [Releases](https://github.com/irpina/digiemu/releases) and unzip it
+   anywhere you can write to, except a OneDrive folder.
+2. Get the Digitakt firmware, `Digitakt_OS1.53.syx`, from Elektron's website.
+3. Run `digiemu.exe`, click **Add firmware** and pick the `.syx`.
+4. When it says the firmware is ready, click **Play**.
 
-## Windows app: digiemu
+Step 3 takes about 25 seconds on a desktop (longer on a slow laptop), once
+per firmware. digiemu identifies the device and version from the file itself,
+formats an emulated +Drive, and runs the firmware's own first boot, which
+installs the factory project and sounds onto it. From then on, **Play** opens
+the panel straight away, and closing the panel saves the session so the next
+Play carries on where you left off.
 
-`digiemu-win64-<version>.zip` is a portable folder: unzip it anywhere you can
-write (not inside OneDrive), run `digiemu.exe`, and pick **Add firmware** to
-give it your own `.syx`. The app reads the device and version from the file
-itself. It then builds everything the emulator needs, once, in under half a
-minute on a desktop (about a minute on a slow laptop): it extracts the
-firmware, creates and formats a +Drive card, and cold-boots until the
-firmware has installed its factory project and sounds onto that card. After
-that, **Play** opens the panel straight away. Quitting saves the session, so
-the next Play carries on where you left off.
+The exe is not code-signed, so Windows shows a SmartScreen prompt the first
+time, and a PC with Smart App Control turned on blocks it.
 
-**LOAD SAMPLES** in the panel's header picks one or more WAV files and puts
-them in `/incoming` on the +Drive, ready to load into a project. The
-firmware only reads the card's index when it boots, so the app saves and
-closes the session, writes the samples, rebuilds (about 15 s) and reopens
-the panel. Project changes that are not saved on the Digitakt may be lost.
+## Using the panel
+
+- **Keys:** click to press. **Shift-click latches** a key, for combinations
+  such as FUNC + a trig; Esc (or *clear latched*) releases them.
+- **Encoders:** mouse wheel or drag. Click the letter under a knob to push it.
+- **Audio:** MUTE silences the live output. PLAY replays what has been
+  recorded, CLEAR empties the recording, and SAVE WAV writes it to a file.
+- **LOAD SAMPLES:** see below.
+
+### Loading samples
+
+LOAD SAMPLES picks one or more WAV files and puts them in `/incoming` on the
++Drive, where the Digitakt's sample browser finds them. Any WAV with 8-, 16-,
+24- or 32-bit integer samples or 32-bit float samples works, at any sample
+rate. Stereo is mixed down to mono, as on the hardware.
+
+The firmware reads the +Drive's file index only when it starts, so loading
+restarts it: digiemu saves and closes the session, writes the samples,
+rebuilds (about 15 seconds) and opens the panel again. **Changes to the
+project that you have not saved on the Digitakt may be lost**, so save first.
+
+A sample keeps its file name, without the extension, up to 64 characters. A
+name the Digitakt would confuse with one already there gets `-2`, `-3` and so
+on. Files that cannot be loaded are listed and left out before anything
+restarts.
+
+### Your firmware folders
 
 Everything lives next to the exe, in `firmware\<name>\`: your `.syx`, the
-card image and the snapshots. Move or copy the folder freely, but never share
-what is inside `firmware\`, which is derived from your firmware. **Rebuild**
-boots again from the card as it is now; **Reset to factory** starts over with
-an empty card.
++Drive image (`plusdrive.img`), the snapshots and the logs. You can move or
+copy the whole digiemu folder. **Do not share anything inside `firmware\`:**
+it is derived from Elektron's firmware.
 
-- Tested with Digitakt mk1 OS 1.53. Another Digitakt mk1 release is offered
-  as "untested" and runs after you confirm; other Elektron products are
-  recognised but not supported yet.
-- The firmware's factory *sample* library lives on a real device's storage,
-  not in the firmware, so `/factory` is empty and tracks that use those
-  samples are silent.
-- The exe is unsigned: Windows shows a SmartScreen prompt on first run, and
-  PCs with Smart App Control on block it. Its Control Flow Guard flag is
-  cleared, because Unicorn's longjmp fails under it; the process then runs
-  with the same protections as `python.exe`.
-- `digiemu-console.exe --add SYX | --list | --rebuild NAME | --reset NAME
-  --yes` does the same without the window, so a CI job can set up a custom
-  firmware build in one step (~23 s on the reference desktop; ~13 s for a
-  rebuild over a card that already holds the factory content). Logs are in
-  `firmware\<name>\logs\`.
+- **Rebuild** starts the firmware again from its +Drive as it is now. Your
+  projects and samples stay; the saved session does not.
+- **Reset to factory** deletes the +Drive image and sets the firmware up
+  again from scratch.
 
-Build the zip with `tools\build-windows.ps1` (offline; see its header and
-`packaging/`). From source, `python -m emu.portable` runs the same app.
-digiemu is the app's own name; the emulator inside it is this fork of
-digikit.
+### Command line
 
-## Setup from source
+`digiemu-console.exe` does the same without the window, which is what a CI
+job testing a custom firmware build wants:
 
-You need Python 3.12 ([uv](https://docs.astral.sh/uv/)), a C toolchain for
-the patched Unicorn ([docs/UNICORN.md](docs/UNICORN.md)), and your own
-`Digitakt_OS1.53.syx` in the working directory.
-
-```sh
-uv sync
-tools/install-patched-unicorn.sh     # Windows: tools\install-patched-unicorn.ps1
-uv run python -m emu.run Digitakt_OS1.53.syx
+```text
+digiemu-console.exe --add FILE.syx [--yes]   set up a firmware (--yes: accept an untested release)
+digiemu-console.exe --list                   list what is set up here
+digiemu-console.exe --rebuild NAME           start one again from its +Drive
+digiemu-console.exe --reset NAME --yes       reset one to factory
 ```
 
-The first run extracts the firmware and builds the boot snapshots, which
-takes a few minutes, once. Then make the fast-start snapshot:
-
-```sh
-uv run python tools/introboot.py --syx Digitakt_OS1.53.syx \
-    --snapshot snapshots/Digitakt_OS1.53/boot400M.snap \
-    --min-lit 1200 --out snapshots/Digitakt_OS1.53/gui-raw.snap
-uv run python tools/uisettle.py --syx Digitakt_OS1.53.syx \
-    --snapshot snapshots/Digitakt_OS1.53/gui-raw.snap \
-    --out snapshots/Digitakt_OS1.53/gui.snap
-```
-
-Do not skip `uisettle.py`. At the first UI frame the firmware is still doing
-its first-boot +Drive work, and a snapshot taken there replays it on every
-start. (This bootstrap has not been re-run from scratch for mk1; the steps
-after it are verified.)
-
-## Run
-
-```sh
-uv run python -m emu.dtpanel [snapshot]
-```
-
-With no argument it opens `gui.snap`. Click a key to press it. Shift-click
-latches a key, for combinations like FUNC + key, and Esc releases latched
-keys. Turn a knob with the mouse wheel or by dragging. The header has MUTE,
-PLAY, CLEAR and SAVE WAV for the audio; `--no-audio` skips the audio model.
-LOAD SAMPLES writes WAV files to the card and closes the window; run on its
-own, the panel leaves rebuilding the snapshots to you.
-
-To put samples on the +Drive by hand, close the emulator (it keeps the card
-image mapped) and add them to the image; they appear in `/incoming` once the
-snapshots are rebuilt from the cold boot:
-
-```sh
-uv run python tools/ekfsadd.py plusdrive.img kick.wav snare.wav
-```
-
+`--home DIR` uses another data folder. Setting up takes about 23 seconds on
+the reference desktop, or about 13 seconds on a +Drive that already holds
+the factory content.
 
 ## Status
 
-Working: boot to the live UI, every key and encoder with the key LEDs, live
-48 kHz audio, the sequencer, and the +Drive. On a desktop the emulator can
-run live audio about 2.5 times faster than real time; `tools/capbench.py`
-measures a given machine.
+digiemu is tested with **Digitakt mk1 OS 1.53** (SHA-256
+`9bdd44bb6102fb25c143cfab97bc92b7a89c463f795d3112dce89771e29bcc92`). Other
+Digitakt mk1 releases are offered as untested and run once you confirm.
+Other Elektron products are recognised and turned away for now.
 
-Not yet: forced interrupts on the second interrupt controller and the
-interrupt masks are not modelled, and 44.1 kHz samples are not resampled.
-The handoff's "Open" list has the rest.
+**Works:** booting to the live user interface; every key, encoder and key
+LED; the sequencer and patterns; the +Drive with projects and samples; live
+48 kHz audio. A desktop runs about 2.5 times faster than the real hardware
+needs, which leaves headroom for live audio; `tools/capbench.py` measures a
+given PC.
 
-## Where things are
+**Not yet:**
+- The factory *sample* library lives on the real device's storage, not in
+  the firmware, so `/factory` is empty and sounds that use it are silent.
+- Whether a 44.1 kHz sample plays at the right pitch is not checked yet. A
+  48 kHz sample's rendered output has been checked against its source.
+- Some interrupt-controller behaviour is approximated rather than modelled.
+- Digitone mk1 is not supported yet.
+
+[docs/STATUS.md](docs/STATUS.md) has the details and the list of open work.
+
+## From source
+
+You need Python 3.12 (with [uv](https://docs.astral.sh/uv/)), a C toolchain
+to build the patched Unicorn engine ([docs/UNICORN.md](docs/UNICORN.md)), and
+your own `.syx`. Tested on Windows 11 and on Linux (WSL2).
+
+```sh
+uv sync
+tools/install-patched-unicorn.sh           # Windows: tools\install-patched-unicorn.ps1
+uv run python -m emu.portable              # the app, with its data in portable/
+uv run python -m emu.portable --add Digitakt_OS1.53.syx   # or set up without the window
+```
+
+The emulator does not run without the patched Unicorn. Of the six patches in
+[patches/](patches/README.md), three fix how Unicorn emulates the ColdFire's
+flags and its multiply-accumulate unit, and three make it fast enough for
+live audio.
+
+To work on the emulator itself (the panel on its own, the boot tools, the
+tracing tools), start with [DIGITAKT-MK1.md](DIGITAKT-MK1.md).
+
+### Building the Windows app
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-windows.ps1 `
+    -BuildVenv ..\.venv-build -SitePackagesFrom <site-packages with PyInstaller> `
+    -Out ..\build-out -Version 0.1.0
+```
+
+The build is offline. It bundles the patched Unicorn from this checkout's
+`.venv`, clears the exes' Control Flow Guard flag (Unicorn's `longjmp` fails
+under it; the process then has the same protections as `python.exe`), and
+runs a self-test of both exes before it writes the zip. The script's header
+and [packaging/](packaging/) explain each step.
+
+### Tests
+
+`tools/ci/run-tests.sh [PYTHON]` runs every test module on its own. Tests that
+need the firmware skip without it, and none of the test data comes from
+Elektron. CI runs the tests and a content guard, which rejects firmware,
+snapshots, card images and any file over 1 MB, on every pull request.
+
+## Documentation
 
 | | |
 |---|---|
-| [HANDOFF-2026-09-23.md](HANDOFF-2026-09-23.md) | Current state and next steps. Each handoff links the one before. |
-| [DIGITAKT-MK1.md](DIGITAKT-MK1.md) | How the mk1 boot, panel, audio and sequencer work, and the tools |
-| [docs/mk1/](docs/mk1/00-INDEX.md) | Firmware reference: 01–09 are generated, 10 onwards written by hand |
+| [docs/STATUS.md](docs/STATUS.md) | What works, what does not, and the open work |
+| [DIGITAKT-MK1.md](DIGITAKT-MK1.md) | How the mk1 emulation works: boot, panel, audio, sequencer, and the tools |
+| [docs/mk1/](docs/mk1/00-INDEX.md) | The firmware reference: 01–09 are generated, 10 onwards written by hand |
 | [patches/README.md](patches/README.md) | The six Unicorn patches |
-| [docs/TOOLS.md](docs/TOOLS.md) | Reverse-engineering tool index |
-| [docs/UPSTREAM-README.md](docs/UPSTREAM-README.md) | Upstream's README, for Digitakt II and Digitone II |
+| [docs/TOOLS.md](docs/TOOLS.md) | The reverse-engineering tools |
+| [docs/history/](docs/history/README.md) | Dated session handoffs, newest first |
 
-Tests: `tools/ci/run-tests.sh` runs each test module on its own; tests that
-need the firmware skip without it. `tools/livecheck.py --pattern` checks live
-audio end to end.
+## Relationship to digikit
+
+digiemu is derived from [m-dwyer/digikit](https://github.com/m-dwyer/digikit)
+at upstream commit `a5643ba`. Upstream targets the Digitakt II and Digitone
+II, and those paths still work: every mk1 behaviour is selected by the device
+file (`devices/digitakt.toml`), and a device file that says nothing keeps
+upstream's behaviour. Upstream's README is
+[docs/UPSTREAM-README.md](docs/UPSTREAM-README.md), and its research notes are
+[docs/FINDINGS.md](docs/FINDINGS.md) and the
+[upstream handoffs](docs/history/README.md#upstream-digitakt-ii-and-digitone-ii).
+
+This repository is published as one snapshot rather than with digikit's
+history. Not included: Elektron firmware, anything extracted from it
+(sections, snapshots, card images), and any tooling for building, signing or
+patching firmware images.
 
 ## Licence
 
 GPL-2.0-or-later ([LICENSE](LICENSE)). The patches in `patches/` modify QEMU
-source vendored inside Unicorn, so they carry its licence, and the emulator
-does not run without them.
+source vendored inside Unicorn, so they carry its licence.
 
 The licence covers the code here and nothing else. **No Elektron firmware is
 included**; it is copyright Elektron. Nothing here grants any right to

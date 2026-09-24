@@ -212,7 +212,7 @@ five machine patches; instruction counts start at 0 there.
 - Why the main loop cannot keep up: each popped item costs about 171k
   instructions on average, against a DTIM3 period of about 156k. Not yet
   known whether this is real UI work made too expensive by the 4.68M
-  instructions-per-second timer rate (`docs/HANDOVER.md`, lines 31-58,
+  instructions-per-second timer rate (`docs/history/upstream/HANDOVER.md`, lines 31-58,
   puts the real rate about 50 times higher), or an emulator artifact such
   as a busy wait or a slow peripheral model. **[O]**
 - `--ips` above 4.68M, applied from `boot400M.snap`, stalls boot: still on
@@ -365,7 +365,7 @@ charges instructions to RTOS tasks at each context switch.
 - The firmware has no CPU-speed calibration or counted delay loop that
   was found: its timed waits use DTIM1 or the PITs. No MCF5441x BogoMIPS
   boot log was found online. The real instruction rate is estimated at
-  200-264M instructions per second, from docs/HANDOVER.md lines 31-58 and
+  200-264M instructions per second, from docs/history/upstream/HANDOVER.md lines 31-58 and
   separately from the Dhrystone figure; `INSTR_PER_SEC` is 4.68M. **[D]**
 
 ### The rate rises automatically after the intro; where wall time goes **[V][O]**
@@ -2901,7 +2901,7 @@ Marks: **[V]** verified in this session, **[C]** corrects an earlier claim,
 ### The scheduler never worked, and one line explains it **[V][C]**
 
 Every run before this one scheduled exactly **one task**. The stated ceiling in
-`docs/NEXT.md` -- "1 new task per ~250M instructions, and the gaps are
+`docs/history/upstream/NEXT.md` -- "1 new task per ~250M instructions, and the gaps are
 widening" -- was not a property of the firmware. It was this bug.
 
 `harness.raise_vector` pushed the *current* PC into the exception frame. The

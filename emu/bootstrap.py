@@ -910,8 +910,8 @@ def prepare_card(path, base=None, progress=None):
 
 # ------------------------------------------------------ first boot's card
 # What the firmware's first-boot job leaves on the card (the +Drive first-
-# boot investigation of 2026-09-23, summarised in HANDOFF-2026-09-23.md; and
-# emu/ekfsformat.py for the ekFS).
+# boot investigation of 2026-09-23, summarised in
+# docs/history/HANDOFF-2026-09-23.md; and emu/ekfsformat.py for the ekFS).
 # "INITIALIZING +DRIVE" erases the project and sound regions and writes
 # BEEFBACE to sector 0; "FACTORY PROJECT/SOUNDS >> +DRIVE" then unpacks the
 # factory project into slot 0 and 256 x 1 KB of sounds, and marks them

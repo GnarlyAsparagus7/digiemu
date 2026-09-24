@@ -172,7 +172,7 @@ emu/gui.py         live panel
 emu/panel.py       the framebuffer the firmware actually draws into
 emu/esdhc.py       SD/MMC controller + eMMC (identification only)
 emu/oracle.py      runs the DEVICE'S OWN validators against a candidate image
-docs/HANDOVER.md   current state, what to do next, and the traps that cost time
+docs/history/upstream/HANDOVER.md   current state, what to do next, and the traps that cost time
 docs/TOOLS.md      reverse-engineering tool index and workflow guide
 ```
 
@@ -191,10 +191,10 @@ uv run python emu/oracle.py                              # acceptance oracle
 
 ## Continuing this work
 
-**Read [`docs/HANDOVER.md`](HANDOVER.md) first.** It is written for someone
+**Read [`docs/history/upstream/HANDOVER.md`](history/upstream/HANDOVER.md) first.** It is written for someone
 with no memory of the sessions that produced this, and it opens with six
 standing warnings about measurements that have already misled people — several
-of them cost a whole session each. [`docs/NEXT.md`](NEXT.md) is the
+of them cost a whole session each. [`docs/history/upstream/NEXT.md`](history/upstream/NEXT.md) is the
 overview and [`docs/FINDINGS.md`](FINDINGS.md) the older evidence.
 
 ## The device-routine oracle

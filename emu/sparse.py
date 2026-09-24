@@ -3,7 +3,8 @@
 The card is a ~950 MB file of which a finished first boot writes a few MB:
 the ekFS format (~2 MB), the factory project and sounds (~3.9 MB). Before
 this module it took 927,400 KB on NTFS, for two reasons measured on
-Windows 11 / NTFS (2026-09-23; HANDOFF-2026-09-23.md, the portable app):
+Windows 11 / NTFS (2026-09-23; docs/history/HANDOFF-2026-09-23.md, the
+portable app):
 
   * Python's file.truncate() on Windows goes through the C runtime's
     _chsize_s, which EXTENDS a file by writing zeros. They are cached

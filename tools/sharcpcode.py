@@ -2,8 +2,8 @@
 """Measure the p-code of the generated SHARC+ language, and compare two runs.
 
 The generated language (tools/sharcspec/ghidra/gen_sleigh.py) gains p-code
-stage by stage (HANDOVER-2026-09-16-machine-to-dsp.md). This tool records
-what a change does to the p-code, to Ghidra's analysis and to the
+stage by stage (docs/history/upstream/HANDOVER-2026-09-16-machine-to-dsp.md).
+This tool records what a change does to the p-code, to Ghidra's analysis and to the
 decompiler, so a change that breaks decoding, bloats the p-code or slows
 analysis shows up as a difference between two runs.
 

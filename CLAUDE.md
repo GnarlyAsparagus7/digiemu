@@ -3,8 +3,8 @@
 Reverse engineering of the Elektron Digitakt II firmware: a ColdFire MCF5441x
 main CPU and a SHARC+ DSP. The work is moving from OS 1.15C to 1.16; the
 device stays on 1.15C (installing 1.16 upgrades the bootstrap irreversibly). Setup is in README.md, results
-in docs/FINDINGS.md, and current state and next steps in the newest
-`HANDOVER-*.md` in the repo root.
+in docs/FINDINGS.md, and current state and next steps in docs/STATUS.md
+(dated session handoffs are in docs/history/).
 
 ## Rules
 

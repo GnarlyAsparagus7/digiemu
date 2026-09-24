@@ -27,8 +27,8 @@ DTMRn fields (manual table 39-2):
 
 Two timers are live in this firmware, both armed, unmasked and at INTC level
 2, and neither was ever delivered before this change. They are entries 1 and
-4 of the nineteen armed-but-undelivered vectors in `docs/HANDOVER.md`
-section 7.
+4 of the nineteen armed-but-undelivered vectors in
+`docs/history/upstream/HANDOVER.md` section 7.
 
 **DTIM1, vector 97, handler `0x40128c4c`** is a one-shot microsecond sleep.
 `0x40128c7c(n)` writes DTRR1 = n, then DTMR1 = `0x841b` (PS = 132 so divide
