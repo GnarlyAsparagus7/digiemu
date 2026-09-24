@@ -60,6 +60,9 @@ Digitone mk1 OS 1.43, SHA-256
 - **Long sessions.** Once, after about an hour idle, the panel went blank
   (the main loop was still alive). Not investigated. The panel's memory use
   over multi-hour sessions has not been measured.
+- **macOS, from source:** live audio goes through AudioQueue
+  (`emu/audioout.py`, contributed in PR #4). It has not been run here, and
+  CI has no macOS job.
 - **The app is unsigned**, and its Control Flow Guard flag is cleared,
   because Unicorn's `longjmp` fails under it.
 - **Digitone Keys.** The OS file is shared, but digiemu runs it as a plain

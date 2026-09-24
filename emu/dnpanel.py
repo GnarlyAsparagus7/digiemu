@@ -1,11 +1,13 @@
 """A Digitone-shaped front panel: the Digitone (mk1) window.
 
 The machinery is emu/dtpanel.py's -- the emulator thread, multitouch input,
-key LEDs, audio controls, session save and shutdown -- and this module only
-draws a different instrument: the OLED, eight encoders in two rows with
-LEVEL/DATA beside them, the six parameter-page keys (TRIG, SYN1, SYN2, FLTR,
-AMP, LFO) down the right, the four track keys T1..T4 and MIDI down the left,
-the menu keys, transport and cursor keys, and sixteen trig keys.
+key LEDs, audio controls and Master Volume, session save and shutdown -- and
+this module only places a different instrument's keys, on the Digitakt
+window's plan: Master Volume and LEVEL/DATA at the top left, the OLED, the
+eight encoders in two rows, one row of keys under them (FUNC, the menus, the
+six parameter pages TRIG, SYN1, SYN2, FLTR, AMP, LFO, and PAGE), the four
+track keys T1..T4 and MIDI down the left, transport, confirm and cursor keys,
+and sixteen trig keys.
 
 Controls are placed by the measured names in devices/digitone.toml, not by
 the firmware's panel-test tables: the Digitone builds those at run time, and
@@ -32,64 +34,55 @@ from emu.dtpanel import AMBER, PLAY_C, REC_C, DigitaktPanel
 # Firmware-independent label -> (x, y, w, h, secondary caption, tint): the
 # labels are devices/digitone.toml's [panel.labels].
 BUTTONS = {
-    # right-hand page column: the six parameter pages, PAGE below
-    'TRIG': (1052, 90, 92, 40, None, None),
-    'SYN1': (1052, 142, 92, 40, None, None),
-    'SYN2': (1052, 194, 92, 40, None, None),
-    'FLTR': (1052, 246, 92, 40, None, None),
-    'AMP': (1052, 298, 92, 40, None, None),
-    'LFO': (1052, 350, 92, 40, None, None),
-    'PAGE': (1052, 410, 92, 38, None, None),
-    # left column: FUNC, then the tracks
-    'FUNC': (30, 406, 88, 40, None, AMBER),
-    'T1': (30, 460, 88, 40, None, None),
-    'T2': (30, 510, 88, 40, None, None),
-    'T3': (30, 560, 88, 40, None, None),
-    'T4': (30, 610, 88, 40, None, None),
-    'MIDI': (30, 668, 88, 40, None, None),
-    # menu row
-    'KEYBOARD': (150, 406, 100, 40, 'Keyboard Setup', None),
-    'SONG': (258, 406, 86, 40, None, None),
-    'GLOBAL': (352, 406, 86, 40, None, None),
-    'VOICE': (446, 406, 86, 40, None, None),
-    'TEMPO': (540, 406, 86, 40, None, None),
-    'BANK': (634, 406, 86, 40, None, None),
-    'PTN': (728, 406, 86, 40, None, None),
-    # transport
-    'STOP': (150, 470, 76, 46, None, None),
-    'PLAY': (236, 470, 76, 46, None, PLAY_C),
-    'RECORD': (322, 470, 76, 46, None, REC_C),
-    # confirm and cursor
-    'YES': (430, 470, 76, 46, None, None),
-    'NO': (516, 470, 76, 46, None, None),
-    'UP': (664, 464, 56, 40, None, None),
-    'LEFT': (604, 510, 56, 40, None, None),
-    'DOWN': (664, 510, 56, 40, None, None),
-    'RIGHT': (724, 510, 56, 40, None, None),
-    # Every encoder pushes (46..54): the push switch carries the knob's name.
-    'A': (596, 190, 48, 18, None, None),
-    'B': (700, 190, 48, 18, None, None),
-    'C': (804, 190, 48, 18, None, None),
-    'D': (908, 190, 48, 18, None, None),
-    'E': (596, 312, 48, 18, None, None),
-    'F': (700, 312, 48, 18, None, None),
-    'G': (804, 312, 48, 18, None, None),
-    'H': (908, 312, 48, 18, None, None),
-    'LEVEL/DATA': (872, 520, 90, 18, None, None),
+    # One row under the screen and encoders: FUNC, then eleven keys, 84 wide
+    # at a 92 pitch -- the four menus, the six parameter pages, and PAGE at
+    # the far right with the pattern-page LEDs above it.
+    'FUNC': (30, 400, 100, 40, None, AMBER),
+    'SONG': (140, 400, 84, 40, None, None),
+    'GLOBAL': (232, 400, 84, 40, None, None),
+    'VOICE': (324, 400, 84, 40, None, None),
+    'TEMPO': (416, 400, 84, 40, None, None),
+    'TRIG': (508, 400, 84, 40, None, None),
+    'SYN1': (600, 400, 84, 40, None, None),
+    'SYN2': (692, 400, 84, 40, None, None),
+    'FLTR': (784, 400, 84, 40, None, None),
+    'AMP': (876, 400, 84, 40, None, None),
+    'LFO': (968, 400, 84, 40, None, None),
+    'PAGE': (1060, 400, 84, 40, None, None),
+    # left column, under FUNC: the four tracks, then MIDI
+    'T1': (30, 460, 100, 40, None, None),
+    'T2': (30, 510, 100, 40, None, None),
+    'T3': (30, 560, 100, 40, None, None),
+    'T4': (30, 610, 100, 40, None, None),
+    'MIDI': (30, 668, 100, 40, None, None),
+    # transport, then BANK and PTN beside it; KEYBOARD below
+    'STOP': (150, 460, 76, 46, None, None),
+    'PLAY': (236, 460, 76, 46, None, PLAY_C),
+    'RECORD': (322, 460, 76, 46, None, REC_C),
+    'BANK': (412, 460, 80, 46, None, None),
+    'PTN': (500, 460, 80, 46, None, None),
+    'KEYBOARD': (150, 516, 120, 40, 'Keyboard Setup', None),
+    # confirm, stacked, and the cursor cross over trig keys 6..8: the
+    # Digitakt window's places
+    'YES': dtpanel.BUTTONS['YES'][:4] + (None, None),
+    'NO': dtpanel.BUTTONS['NO'][:4] + (None, None),
+    'UP': dtpanel.BUTTONS['UP'],
+    'LEFT': dtpanel.BUTTONS['LEFT'],
+    'DOWN': dtpanel.BUTTONS['DOWN'],
+    'RIGHT': dtpanel.BUTTONS['RIGHT'],
+    # Every encoder pushes (46..54): the push switch carries the knob's
+    # name, under the knob as on the Digitakt.
+    **{k: dtpanel.BUTTONS[k] for k in 'ABCDEFGH'},
+    'LEVEL/DATA': dtpanel.BUTTONS['LEVEL/DATA'][:4] + (None, None),
 }
 # sixteen trig keys, two rows of eight
 for _i in range(16):
     BUTTONS[str(_i + 1)] = (150 + (_i % 8) * 108, 598 + (_i // 8) * 82,
                             98, 72, None, None)
 
-# Encoder label -> (centre x, centre y, radius).
-ENCODERS = {
-    'A': (620, 150, 34), 'B': (724, 150, 34),
-    'C': (828, 150, 34), 'D': (932, 150, 34),
-    'E': (620, 272, 34), 'F': (724, 272, 34),
-    'G': (828, 272, 34), 'H': (932, 272, 34),
-    'LEVEL/DATA': (917, 482, 30),
-}
+# Encoder label -> (centre x, centre y, radius): the Digitakt window's knobs,
+# LEVEL/DATA at the top left under Master Volume.
+ENCODERS = dict(dtpanel.ENCODERS)
 
 
 class DigitonePanel(DigitaktPanel):

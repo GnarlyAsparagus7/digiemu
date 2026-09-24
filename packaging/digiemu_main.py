@@ -26,7 +26,6 @@ the next can go wrong:
 3. Everything else goes to emu.portable.main(), which is imported only then.
 """
 import datetime
-import glob
 import hashlib
 import importlib
 import json
@@ -243,52 +242,7 @@ def _check_devices():
     return {'dir': where, 'devices': [d.name for d in found]}
 
 
-def _ensure_tk_env(target=None):
-    """When running from source in a virtualenv (e.g. uv managed Python on macOS),
-    Tcl and Tk libraries reside in sys.base_prefix rather than the virtualenv.
-    Without TCL_LIBRARY/TK_LIBRARY set, background child processes (spawned with
-    stdin=DEVNULL) fail to locate init.tcl. Locate and export them if not already set,
-    and symlink them into the virtualenv's lib directory if writable."""
-    if getattr(sys, 'frozen', False):
-        return
-    if target is None:
-        target = os.environ
-    if not target.get('TCL_LIBRARY') or not os.path.isdir(target['TCL_LIBRARY']):
-        for prefix in (sys.base_prefix, sys.prefix):
-            cands = sorted(glob.glob(os.path.join(prefix, 'lib', 'tcl8.*')) +
-                           glob.glob(os.path.join(prefix, 'lib', 'tcl9.*')), reverse=True)
-            for c in cands:
-                if os.path.isfile(os.path.join(c, 'init.tcl')):
-                    target['TCL_LIBRARY'] = c
-                    break
-            if target.get('TCL_LIBRARY'):
-                break
-    if not target.get('TK_LIBRARY') or not os.path.isdir(target['TK_LIBRARY']):
-        for prefix in (sys.base_prefix, sys.prefix):
-            cands = sorted(glob.glob(os.path.join(prefix, 'lib', 'tk8.*')) +
-                           glob.glob(os.path.join(prefix, 'lib', 'tk9.*')), reverse=True)
-            for c in cands:
-                if os.path.isfile(os.path.join(c, 'tk.tcl')):
-                    target['TK_LIBRARY'] = c
-                    break
-            if target.get('TK_LIBRARY'):
-                break
-    if sys.prefix != sys.base_prefix:
-        venv_lib = os.path.join(sys.prefix, 'lib')
-        if os.path.isdir(venv_lib):
-            for var in ('TCL_LIBRARY', 'TK_LIBRARY'):
-                src = target.get(var)
-                if src and os.path.isdir(src):
-                    dst = os.path.join(venv_lib, os.path.basename(src))
-                    if not os.path.exists(dst):
-                        try:
-                            os.symlink(src, dst)
-                        except OSError:
-                            pass
-
-
 def _check_tk():
-    _ensure_tk_env()
     import tkinter
     root = tkinter.Tk()
     try:
@@ -412,7 +366,6 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
     setup_stdio()
     _log_thread_exceptions()
-    _ensure_tk_env()
     if argv[:1] == ['--selftest']:
         return selftest(argv[1:])
     import emu.portable

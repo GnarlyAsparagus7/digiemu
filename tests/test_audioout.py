@@ -1,3 +1,11 @@
+"""emu/audioout.py: the PCM helpers, the Master Volume gain, and the host
+output devices.
+
+Nothing here opens a real sound device unless asked: the two device tests
+play a quiet tone through the default output, and fail on a machine with
+none (a remote desktop, a runner), so they run only with
+DIGIEMU_AUDIO_DEVICE_TESTS=1. Everything else stands in for the device.
+"""
 import os
 import struct
 import sys
@@ -5,8 +13,19 @@ import tempfile
 import time
 import unittest
 import wave
+from unittest import mock
 
 from emu import audioout
+
+DEVICE_TESTS = unittest.skipUnless(
+    os.environ.get('DIGIEMU_AUDIO_DEVICE_TESTS') == '1'
+    and sys.platform in ('win32', 'darwin'),
+    'plays through the default output: set DIGIEMU_AUDIO_DEVICE_TESTS=1 '
+    '(Windows or macOS)')
+
+
+def _pcm(*samples):
+    return struct.pack('<%dh' % len(samples), *samples)
 
 
 class AudioOutTest(unittest.TestCase):
@@ -43,7 +62,93 @@ class AudioOutTest(unittest.TestCase):
                 self.assertEqual(r.getframerate(), 48000)
                 self.assertEqual(r.getnframes(), 100)
 
-    @unittest.skipUnless(sys.platform in ('win32', 'darwin'), 'WaveOut supports Windows and macOS')
+    def test_wav_file_applies_the_gain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'half.wav')
+            w = audioout.WavFile(path)
+            w.gain = 0.5
+            w.write(_pcm(1000, -1000))
+            w.close()
+            with wave.open(path, 'rb') as r:
+                self.assertEqual(r.readframes(1), _pcm(500, -500))
+
+
+class GainTest(unittest.TestCase):
+    """apply_gain: the Master Volume knob's software gain."""
+
+    def test_unity_passes_the_same_bytes_through(self):
+        pcm = _pcm(1, -2, 32767, -32768)
+        self.assertIs(audioout.apply_gain(pcm, 1.0), pcm)
+        self.assertEqual(audioout.apply_gain(b'', 0.5), b'')
+
+    def test_scaling_and_silence(self):
+        self.assertEqual(audioout.apply_gain(_pcm(1000, -1000, 3), 0.5),
+                         _pcm(500, -500, 1))
+        self.assertEqual(audioout.apply_gain(_pcm(1000, -1000), 0.0),
+                         _pcm(0, 0))
+
+    def test_boost_clips_to_16_bits(self):
+        self.assertEqual(audioout.apply_gain(_pcm(30000, -30000, 100), 1.5),
+                         _pcm(32767, -32768, 150))
+
+
+class DeviceChoiceTest(unittest.TestCase):
+    """WaveOut picks the host's output without opening anything here."""
+
+    def test_each_platform_gets_its_own_output(self):
+        made = []
+
+        def fake(name):
+            return lambda *a: made.append((name, a)) or name
+        with mock.patch.object(audioout, '_WinMMOut', fake('winmm')), \
+                mock.patch.object(audioout, '_AudioQueueOut', fake('audioqueue')):
+            for platform, want in (('win32', 'winmm'), ('darwin', 'audioqueue')):
+                with mock.patch.object(audioout.sys, 'platform', platform):
+                    self.assertEqual(audioout.WaveOut(44100, 2), want)
+        self.assertEqual(made, [('winmm', (44100, 2, 16, 20)),
+                                ('audioqueue', (44100, 2, 16, 20))])
+
+    def test_other_platforms_have_no_device(self):
+        with mock.patch.object(audioout.sys, 'platform', 'linux'):
+            with self.assertRaises(OSError):
+                audioout.WaveOut()
+
+
+class _RecordingOut:
+    """Stands in for a device: records each write and the gain it had."""
+    made = []
+
+    def __init__(self, rate, channels):
+        self.gain = 1.0
+        self.writes = []
+        _RecordingOut.made.append(self)
+
+    def write(self, pcm, block=False, abort=None):
+        self.writes.append((len(pcm), self.gain))
+
+    def drain(self, abort=None):
+        pass
+
+    def close(self):
+        pass
+
+
+class PlayerGainTest(unittest.TestCase):
+    def test_replay_follows_master_volume(self):
+        _RecordingOut.made = []
+        with mock.patch.object(audioout, 'WaveOut', _RecordingOut):
+            player = audioout.Player(rate=48000, channels=2)
+            player.gain = 0.25
+            player.play(bytes(48000 * 4 // 4))           # a quarter second
+            player._thread.join(5)
+        out, = _RecordingOut.made
+        self.assertEqual(sum(n for n, _g in out.writes), 48000)
+        self.assertEqual({g for _n, g in out.writes}, {0.25})
+        self.assertGreater(len(out.writes), 1)            # in tenths of a second
+
+
+class DeviceTest(unittest.TestCase):
+    @DEVICE_TESTS
     def test_waveout_lifecycle(self):
         out = audioout.WaveOut(rate=48000, channels=2, buffers=8, block_ms=10)
         self.assertEqual(out.rate, 48000)
@@ -58,7 +163,7 @@ class AudioOutTest(unittest.TestCase):
         self.assertEqual(out.queued(), 0)
         out.close()
 
-    @unittest.skipUnless(sys.platform in ('win32', 'darwin'), 'Player supports Windows and macOS')
+    @DEVICE_TESTS
     def test_player_lifecycle(self):
         player = audioout.Player(rate=48000, channels=2)
         self.assertIsNone(player.error)

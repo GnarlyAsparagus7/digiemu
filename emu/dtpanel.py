@@ -69,7 +69,9 @@ BG, FACE, EDGE = '#0b0d10', '#1c2027', '#2c323b'
 TEXT, DIM, AMBER = '#c9d3e0', '#6b7789', '#ffb638'
 LIT, REC_C, PLAY_C = '#3f4b5c', '#e2483d', '#3fbf6a'
 ERR = '#ff8f8f'                   # emu/gui.py's App uses the same for errors
-SCREEN_X, SCREEN_Y = 38, 102      # the OLED's top-left on the canvas
+# The OLED's top-left on the canvas, right of the Master Volume and
+# LEVEL/DATA knobs.
+SCREEN_X, SCREEN_Y = 168, 102
 
 # main()'s return codes, besides 0 (closed cleanly, session saved if asked),
 # 1 (the emulator failed or halted) and 2 (the session was not saved).
@@ -127,6 +129,8 @@ BUTTONS = {
     # SONG / GLOBAL / SAMPLE / TEMPO (the four firmware menu items) and
     # TRIG / SRC / FLTR / AMP / LFO (the five page buttons), with PAGE at
     # the far right. 92 wide each, 8px gaps.
+    # The key the panel-test table calls PATTERN MENU is SONG on OS 1.5x:
+    # held, the firmware shows "SONG MODE OFF". Named for what it does.
     'SONG': (140, 400, 92, 40, None, None),
     'GLOBAL': (240, 400, 92, 40, None, None),
     'SAMPLE': (340, 400, 92, 40, None, None),
@@ -141,9 +145,10 @@ BUTTONS = {
     'STOP': (150, 460, 76, 46, None, None),
     'PLAY': (236, 460, 76, 46, None, PLAY_C),
     'RECORD': (322, 460, 76, 46, None, REC_C),
-    # confirm (stacked vertically, to the right of the transport cluster)
-    'YES': (600, 460, 76, 46, 'Reload', None),
-    'NO': (600, 510, 76, 46, 'tTime', None),
+    # confirm (stacked vertically, to the right of the transport cluster),
+    # far enough apart that YES's caption clears NO
+    'YES': (600, 460, 76, 40, 'Reload', None),
+    'NO': (600, 526, 76, 40, 'tTime', None),
     # cursor arrows: UP aligned with the transport row; LEFT/DOWN/RIGHT in
     # a row below it (a +/- cross shape). The cluster sits over trig key 7
     # (DOWN centered at x=847 = trig 7's center), with LEFT over trig 6
@@ -183,13 +188,23 @@ ENCODERS = {
     'LEVEL/DATA': (90, 280, 28),
 }
 
-# Master Volume: top-left decorative knob. The hardware's volume pot is
-# analog (not in the firmware's code table), so the emulator can't drive it;
-# the panel still draws it so the top-left matches the real hardware.
+# Master Volume: the top-left knob, (centre x, centre y, radius). The
+# hardware's volume pot is analog, not a control the firmware reads, so the
+# panel turns it into a software gain on the live output instead
+# (_turn_master_volume).
 MASTER_VOLUME = (90, 195, 36)
 
 
 PANEL_W, PANEL_H = 1160, 790      # the drawn control surface
+
+
+def master_volume_angle(value, top):
+    """-> the Master Volume indicator's angle in radians, clockwise from 12
+    o'clock, for a gain of `value` on a knob that reaches `top`. The whole
+    300-degree sweep is used: 0 points at 7 o'clock and `top` at 5 o'clock,
+    so every position past unity still reads as louder."""
+    value = max(0.0, min(top, value))
+    return -5 * math.pi / 6 + (value / top) * (5 * math.pi / 3)
 
 
 class DigitaktPanel(tk.Tk):
@@ -211,7 +226,7 @@ class DigitaktPanel(tk.Tk):
     BUTTONS = BUTTONS
     ENCODERS = ENCODERS
     PANEL_W, PANEL_H = PANEL_W, PANEL_H
-    SCREEN_X, SCREEN_Y = 168, 102        # Shifted right by 130px for Digitakt
+    SCREEN_X, SCREEN_Y = SCREEN_X, SCREEN_Y
     SAMPLES = True                       # the LOAD SAMPLES button
 
     def __init__(self, snapshot, syx=None, audio=True, save_on_exit=None,
@@ -354,6 +369,8 @@ class DigitaktPanel(tk.Tk):
             for item in (rect, txt):
                 c.tag_bind(item, '<Button-1>', lambda _e, f=fn: f())
             self.audio_btns[name] = (rect, txt)
+        # Every product has the knob; only the Digitakt has LOAD SAMPLES.
+        self._draw_master_volume()
         if not self.SAMPLES:
             return
         x, w = 1000, 128
@@ -363,10 +380,12 @@ class DigitaktPanel(tk.Tk):
         for item in (rect, txt):
             c.tag_bind(item, '<Button-1>', lambda _e: self.load_samples())
 
-        # Master Volume: top-left, interactive knob. The hardware's
-        # volume pot is analog (not in the firmware's code table), so the
-        # emulator applies the knob position as a software gain before
-        # the samples reach the host device.
+    def _draw_master_volume(self):
+        """Master Volume: the top-left knob. The hardware's volume pot is
+        analog (not in the firmware's code table), so the emulator applies
+        the knob position as a software gain before the samples reach the
+        host device."""
+        c = self.canvas
         mv_x, mv_y, mv_r = MASTER_VOLUME
         self._mv_oval = c.create_oval(
             mv_x - mv_r, mv_y - mv_r, mv_x + mv_r, mv_y + mv_r,
@@ -422,6 +441,7 @@ class DigitaktPanel(tk.Tk):
         rate = emu.audio_cfg['rate']
         if self.player.rate != rate:
             self.player = audioout.Player(rate=rate)
+        self.player.gain = getattr(self, '_mv_value', 1.0)
         self.player.play(pcm)
         self._note('playing %.2f s' % (len(pcm) / 4 / rate), 1.0)
 
@@ -669,17 +689,15 @@ class DigitaktPanel(tk.Tk):
     # ------------------------------------------------------ Master Volume knob
     # The hardware's volume pot is analog (not in the firmware's code
     # table), so the knob is purely a panel-side control. Turning it applies
-    # a software gain to the live output (and to SAVE WAV).
-    _MV_STEP = 1.0 / 20        # 20 wheel clicks cover the full range
+    # a software gain to the live output and to PLAY's replay; SAVE WAV
+    # writes the recording as the firmware made it.
+    _MV_STEP = 1.0 / 20        # 20 wheel clicks from silent to unity
     _MV_MAX = 1.5              # can push a little past unity; clipped at host
 
     def _paint_master_volume(self):
         """Redraw the knob's indicator line for the current value."""
         mv_x, mv_y, mv_r = MASTER_VOLUME
-        # Indicator sweeps from 7 o'clock (silent) clockwise to 5 o'clock
-        # (max). Range = 300 degrees = 5*pi/3.
-        angle = -5 * math.pi / 6 + self._mv_value * (5 * math.pi / 3)
-        a = angle - math.pi / 2
+        a = master_volume_angle(self._mv_value, self._MV_MAX) - math.pi / 2
         self.canvas.coords(
             self._mv_mark,
             mv_x + math.cos(a) * (mv_r - 22),
@@ -694,6 +712,7 @@ class DigitaktPanel(tk.Tk):
                                       self._mv_value + step * self._MV_STEP))
         self._paint_master_volume()
         self.emu.set_volume(self._mv_value)
+        self.player.gain = self._mv_value
 
     def _mv_drag_start(self, event):
         self._mv_drag_y = event.y

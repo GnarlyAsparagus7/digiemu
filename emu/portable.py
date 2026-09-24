@@ -98,7 +98,6 @@ import contextlib
 import dataclasses
 import datetime
 import faulthandler
-import glob
 import hashlib
 import json
 import os
@@ -395,48 +394,32 @@ def _dtpanel():
     return _panel_module('emu.dtpanel')
 
 
-def _ensure_tk_env(target=None):
-    """When running from source in a virtualenv (e.g. uv managed Python on macOS),
-    Tcl and Tk libraries reside in sys.base_prefix rather than the virtualenv.
-    Without TCL_LIBRARY/TK_LIBRARY set, background child processes (spawned with
-    stdin=DEVNULL) fail to locate init.tcl. Locate and export them if not already set,
-    and symlink them into the virtualenv's lib directory if writable."""
-    if is_frozen():
-        return
-    if target is None:
-        target = os.environ
-    if not target.get('TCL_LIBRARY') or not os.path.isdir(target['TCL_LIBRARY']):
-        for prefix in (sys.base_prefix, sys.prefix):
-            cands = sorted(glob.glob(os.path.join(prefix, 'lib', 'tcl8.*')) +
-                           glob.glob(os.path.join(prefix, 'lib', 'tcl9.*')), reverse=True)
-            for c in cands:
-                if os.path.isfile(os.path.join(c, 'init.tcl')):
-                    target['TCL_LIBRARY'] = c
-                    break
-            if target.get('TCL_LIBRARY'):
-                break
-    if not target.get('TK_LIBRARY') or not os.path.isdir(target['TK_LIBRARY']):
-        for prefix in (sys.base_prefix, sys.prefix):
-            cands = sorted(glob.glob(os.path.join(prefix, 'lib', 'tk8.*')) +
-                           glob.glob(os.path.join(prefix, 'lib', 'tk9.*')), reverse=True)
-            for c in cands:
-                if os.path.isfile(os.path.join(c, 'tk.tcl')):
-                    target['TK_LIBRARY'] = c
-                    break
-            if target.get('TK_LIBRARY'):
-                break
-    if sys.prefix != sys.base_prefix:
-        venv_lib = os.path.join(sys.prefix, 'lib')
-        if os.path.isdir(venv_lib):
-            for var in ('TCL_LIBRARY', 'TK_LIBRARY'):
-                src = target.get(var)
-                if src and os.path.isdir(src):
-                    dst = os.path.join(venv_lib, os.path.basename(src))
-                    if not os.path.exists(dst):
-                        try:
-                            os.symlink(src, dst)
-                        except OSError:
-                            pass
+def _tk_library_env(env, platform=None, prefix=None):
+    """macOS, from source: point TCL_LIBRARY and TK_LIBRARY at the base
+    Python's Tcl/Tk scripts when they are unset or wrong. -> env.
+
+    In a venv on a uv-managed (python-build-standalone) Python, Tcl looks for
+    init.tcl beside the venv's interpreter, where it is not, and Tk fails to
+    start in the panel and in the workers. Only the version tkinter was built
+    with is used. Nothing is written anywhere; the frozen app bundles its own
+    Tcl/Tk and is left alone, and so is every other platform."""
+    platform = sys.platform if platform is None else platform
+    if platform != 'darwin' or is_frozen():
+        return env
+    try:
+        import tkinter
+    except ImportError:
+        return env
+    prefix = sys.base_prefix if prefix is None else prefix
+    for var, name, marker in (
+            ('TCL_LIBRARY', 'tcl%s' % tkinter.TclVersion, 'init.tcl'),
+            ('TK_LIBRARY', 'tk%s' % tkinter.TkVersion, 'tk.tcl')):
+        if os.path.isdir(env.get(var) or ''):
+            continue
+        where = os.path.join(prefix, 'lib', name)
+        if os.path.isfile(os.path.join(where, marker)):
+            env[var] = where
+    return env
 
 
 def _ensure_import_path():
@@ -444,7 +427,7 @@ def _ensure_import_path():
     importable for the lazy imports that follow."""
     if not is_frozen() and REPO not in sys.path:
         sys.path.insert(0, REPO)
-    _ensure_tk_env()
+    _tk_library_env(os.environ)
 
 
 # --- one firmware folder -------------------------------------------------------
@@ -509,7 +492,7 @@ def child_env(base=None):
     else:
         rest = env.get('PYTHONPATH')
         env['PYTHONPATH'] = REPO + (os.pathsep + rest if rest else '')
-        _ensure_tk_env(env)
+        _tk_library_env(env)
     return env
 
 

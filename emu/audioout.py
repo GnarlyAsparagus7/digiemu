@@ -242,8 +242,11 @@ class _AudioQueueOut:
         self._started = False
         self._lock = threading.Lock()
 
+        # kAudioFormatLinearPCM ('lpcm'), signed integer and packed: plain
+        # interleaved 16-bit stereo, one frame per packet.
         fmt = _AudioStreamBasicDescription(
-            float(rate), 0x6c70636d, (1 << 2), self.frame, 1, self.frame, channels, 16, 0
+            float(rate), 0x6c70636d, (1 << 2) | (1 << 3), self.frame, 1,
+            self.frame, channels, 16, 0
         )
         self._cb_type = ctypes.CFUNCTYPE(
             None, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(_AudioQueueBuffer)
@@ -451,6 +454,7 @@ class Player:
 
     def __init__(self, rate=48000, channels=2):
         self.rate, self.channels = rate, channels
+        self.gain = 1.0             # the panel's Master Volume
         self.error = None
         self._thread = None
         self._stop = threading.Event()
@@ -479,8 +483,15 @@ class Player:
         except OSError as exc:
             self.error = str(exc)
             return
+        # A tenth of a second at a time, so turning Master Volume during a
+        # replay is heard at once rather than on the next PLAY.
+        step = self.rate * self.channels * 2 // 10
         try:
-            out.write(pcm, block=True, abort=stop.is_set)
+            for i in range(0, len(pcm), step):
+                if stop.is_set():
+                    break
+                out.gain = self.gain
+                out.write(pcm[i:i + step], block=True, abort=stop.is_set)
             out.drain(abort=stop.is_set)
         finally:
             out.close()

@@ -1290,50 +1290,67 @@ class EncoderScaleTest(Quiet):
 
 
 @NEEDS_GUI
-class DigitoneLayoutTest(unittest.TestCase):
-    """emu/dnpanel.py draws every key devices/digitone.toml names, on the
-    panel, clear of the screen and of each other."""
+class PanelLayoutTest(unittest.TestCase):
+    """Both windows draw every key their device file names, on the panel,
+    clear of the screen, the Master Volume knob, the page LEDs and each
+    other -- captions included, which is how YES's "Reload" once sat on NO.
+    Each window's own SCREEN_X is used: the Digitone window inherits the
+    Digitakt's, and a check of the module constant alone missed it."""
 
     def setUp(self):
         from emu import device, dnpanel, dtpanel, gui
         self.dn, self.dt, self.gui = dnpanel, dtpanel, gui
-        self.dev = device.load(os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), 'devices', 'digitone.toml'))
+        devices = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), 'devices')
+        self.windows = (
+            (dtpanel.DigitaktPanel, device.load(os.path.join(devices, 'digitakt.toml'))),
+            (dnpanel.DigitonePanel, device.load(os.path.join(devices, 'digitone.toml'))))
 
-    def boxes(self):
-        cls = self.dn.DigitonePanel
+    def boxes(self, cls, dev):
         out = {'button ' + k: (x, y, x + w, y + h)
                for k, (x, y, w, h, _sub, _tint) in cls.BUTTONS.items()}
+        # A caption is centred under its key at y + h + 11, 8-point text.
+        out.update({'caption ' + k: (x + w / 2 - 3.2 * len(sub), y + h + 5,
+                                     x + w / 2 + 3.2 * len(sub), y + h + 17)
+                    for k, (x, y, w, h, sub, _tint) in cls.BUTTONS.items() if sub})
         out.update({'encoder ' + k: (x - r, y - r, x + r, y + r)
                     for k, (x, y, r) in cls.ENCODERS.items()})
-        sx, sy = self.dt.SCREEN_X, self.dt.SCREEN_Y
+        x, y, r = self.dt.MASTER_VOLUME
+        out['master volume'] = (x - r, y - r, x + r, y + r + 17)   # + its label
+        px, py = cls.BUTTONS['PAGE'][:2]
+        for i, _led in enumerate(dev.page_leds):
+            cx, cy = px + 13 + i * 22, py - 12
+            out['page led %d' % i] = (cx - 5, cy - 5, cx + 5, cy + 5)
+        sx, sy = cls.SCREEN_X, cls.SCREEN_Y
         out['screen'] = (sx, sy, sx + self.gui.W * self.dt.SCALE,
                          sy + self.gui.H * self.dt.SCALE)
         return out
 
     def test_every_measured_key_has_a_place(self):
-        cls = self.dn.DigitonePanel
-        missing = set(self.dev.labels.values()) - set(cls.BUTTONS)
-        self.assertEqual(missing, set())
-        self.assertIn('PAGE', cls.BUTTONS)          # the page LEDs hang off it
+        for cls, dev in self.windows:
+            missing = set(dev.labels.values()) - set(cls.BUTTONS)
+            self.assertEqual(missing, set(), cls.PRODUCT)
+            self.assertIn('PAGE', cls.BUTTONS)      # the page LEDs hang off it
 
     def test_nine_encoders_including_level_data(self):
-        cls = self.dn.DigitonePanel
-        self.assertEqual(len(cls.ENCODERS), self.dev.encoders)
-        self.assertEqual(sorted(cls.ENCODERS),
-                         sorted('ABCDEFGH') + ['LEVEL/DATA'])
+        for cls, dev in self.windows:
+            self.assertEqual(len(cls.ENCODERS), dev.encoders, cls.PRODUCT)
+            self.assertEqual(sorted(cls.ENCODERS),
+                             sorted('ABCDEFGH') + ['LEVEL/DATA'])
 
     def test_nothing_overlaps_or_leaves_the_panel(self):
-        cls = self.dn.DigitonePanel
-        boxes = sorted(self.boxes().items())
-        for name, (x0, y0, x1, y1) in boxes:
-            self.assertTrue(0 <= x0 < x1 <= cls.PANEL_W
-                            and 70 <= y0 < y1 <= cls.PANEL_H, name)
-        for i, (a, ba) in enumerate(boxes):
-            for b, bb in boxes[i + 1:]:
-                apart = (ba[2] <= bb[0] or bb[2] <= ba[0]
-                         or ba[3] <= bb[1] or bb[3] <= ba[1])
-                self.assertTrue(apart, '%s overlaps %s' % (a, b))
+        for cls, dev in self.windows:
+            boxes = sorted(self.boxes(cls, dev).items())
+            for name, (x0, y0, x1, y1) in boxes:
+                self.assertTrue(0 <= x0 < x1 <= cls.PANEL_W
+                                and 70 <= y0 < y1 <= cls.PANEL_H,
+                                '%s: %s' % (cls.PRODUCT, name))
+            for i, (a, ba) in enumerate(boxes):
+                for b, bb in boxes[i + 1:]:
+                    apart = (ba[2] <= bb[0] or bb[2] <= ba[0]
+                             or ba[3] <= bb[1] or bb[3] <= ba[1])
+                    self.assertTrue(apart, '%s: %s overlaps %s'
+                                    % (cls.PRODUCT, a, b))
 
     def test_it_is_its_own_product_with_no_sample_loader(self):
         cls = self.dn.DigitonePanel
@@ -1342,6 +1359,72 @@ class DigitoneLayoutTest(unittest.TestCase):
         self.assertIn('Digitone', cls.TITLE)
         self.assertFalse(cls.SAMPLES)
         self.assertTrue(self.dt.DigitaktPanel.SAMPLES)
+
+
+@NEEDS_GUI
+class MasterVolumeTest(unittest.TestCase):
+    """The knob's indicator spans its whole range, so a gain past unity never
+    points back towards silent (it once wrapped: 1.5 read as 10 o'clock)."""
+
+    def test_the_sweep_runs_7_to_5_oclock_over_the_whole_range(self):
+        import math
+        from emu.dtpanel import DigitaktPanel, master_volume_angle
+        top = DigitaktPanel._MV_MAX
+
+        def oclock(v):
+            return (math.degrees(master_volume_angle(v, top)) % 360) / 30 or 12
+        self.assertAlmostEqual(oclock(0.0), 7.0)
+        self.assertAlmostEqual(oclock(top), 5.0)
+        angles = [master_volume_angle(v / 20, top) for v in range(0, 31)]
+        self.assertEqual(angles, sorted(angles))                 # always louder
+        self.assertLess(angles[-1] - angles[0], math.radians(301))
+        self.assertEqual(master_volume_angle(9.0, top), master_volume_angle(top, top))
+        self.assertEqual(master_volume_angle(-1.0, top), master_volume_angle(0.0, top))
+
+    def test_every_window_draws_the_knob_and_it_reaches_both_outputs(self):
+        # The Digitone window once had no knob: it was drawn after the early
+        # return that skips LOAD SAMPLES.
+        from emu import dnpanel, dtpanel
+
+        class Canvas:
+            def __init__(self):
+                self.drawn, self.binds, self.n = [], {}, 0
+
+            def _new(self, kind, **kw):
+                self.n += 1
+                self.drawn.append((kind, kw))
+                return self.n
+            create_text = lambda self, *a, **kw: self._new('text', **kw)
+            create_oval = lambda self, *a, **kw: self._new('oval', **kw)
+            create_line = lambda self, *a, **kw: self._new('line', **kw)
+
+            def tag_bind(self, item, seq, fn):
+                self.binds.setdefault(item, []).append(seq)
+
+            def coords(self, item, *xy):
+                pass
+
+        for cls in (dtpanel.DigitaktPanel, dnpanel.DigitonePanel):
+            win = types.SimpleNamespace(
+                canvas=Canvas(), SAMPLES=cls.SAMPLES, _MV_MAX=cls._MV_MAX,
+                _MV_STEP=cls._MV_STEP, _rr=lambda *a, **kw: 0,
+                emu=types.SimpleNamespace(set_volume=lambda v: gains.append(v)),
+                player=types.SimpleNamespace(gain=1.0))
+            for name in ('audio_toggle_mute', 'audio_play', 'audio_clear',
+                         'audio_save', 'load_samples'):
+                setattr(win, name, lambda: None)
+            for name in ('_draw_master_volume', '_paint_master_volume'):
+                setattr(win, name, getattr(cls, name).__get__(win))
+            gains = []
+            cls._draw_audio_controls(win)
+            texts = [kw.get('text') for kind, kw in win.canvas.drawn if kind == 'text']
+            self.assertIn('Master Volume', texts, cls.PRODUCT)
+            self.assertIn('<MouseWheel>', win.canvas.binds[win._mv_oval], cls.PRODUCT)
+            self.assertEqual(win._mv_value, 1.0)
+            cls._turn_master_volume(win, -2)
+            self.assertAlmostEqual(win._mv_value, 0.9)
+            self.assertEqual(gains, [win._mv_value])              # live output
+            self.assertEqual(win.player.gain, win._mv_value)      # PLAY's replay
 
 
 class GlobEscapeTest(unittest.TestCase):

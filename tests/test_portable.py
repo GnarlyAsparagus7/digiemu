@@ -367,6 +367,50 @@ class LayoutTest(Base):
 
 # --- environment -------------------------------------------------------------------
 
+class TkLibraryEnvTest(unittest.TestCase):
+    """_tk_library_env: from source on macOS, point Tcl/Tk at the base
+    Python's scripts (a uv-managed Python's venv hides them); elsewhere,
+    and in the frozen app, change nothing. It never writes files."""
+
+    def setUp(self):
+        try:
+            import tkinter
+        except ImportError:
+            self.skipTest('no tkinter')
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.prefix = tmp.name
+        self.tcl = os.path.join(self.prefix, 'lib', 'tcl%s' % tkinter.TclVersion)
+        self.tk = os.path.join(self.prefix, 'lib', 'tk%s' % tkinter.TkVersion)
+        for d, marker in ((self.tcl, 'init.tcl'), (self.tk, 'tk.tcl')):
+            os.makedirs(d)
+            open(os.path.join(d, marker), 'w').close()
+        # Another version beside them must not be picked.
+        os.makedirs(os.path.join(self.prefix, 'lib', 'tcl9.9'))
+        open(os.path.join(self.prefix, 'lib', 'tcl9.9', 'init.tcl'), 'w').close()
+
+    def env(self, platform, **env):
+        before = sorted(os.listdir(os.path.join(self.prefix, 'lib')))
+        out = portable._tk_library_env(dict(env), platform=platform, prefix=self.prefix)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.prefix, 'lib'))), before)
+        return out
+
+    def test_macos_gets_the_base_pythons_scripts(self):
+        self.assertEqual(self.env('darwin'),
+                         {'TCL_LIBRARY': self.tcl, 'TK_LIBRARY': self.tk})
+
+    def test_a_working_setting_is_kept_and_a_stale_one_replaced(self):
+        keep = self.prefix
+        out = self.env('darwin', TCL_LIBRARY=keep, TK_LIBRARY='/nowhere/tk8.6')
+        self.assertEqual(out, {'TCL_LIBRARY': keep, 'TK_LIBRARY': self.tk})
+
+    def test_other_platforms_and_the_frozen_app_are_left_alone(self):
+        for platform in ('win32', 'linux'):
+            self.assertEqual(self.env(platform), {})
+        with mock.patch.object(portable, 'is_frozen', return_value=True):
+            self.assertEqual(self.env('darwin'), {})
+
+
 class EnvTest(Base):
     def test_apply_env_assigns_absolute_paths_and_moves_cwd(self):
         paths = self.make_folder()

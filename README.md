@@ -37,14 +37,18 @@ time, and a PC with Smart App Control turned on blocks it.
 - **Keys:** click to press. **Shift-click latches** a key, for combinations
   such as FUNC + a trig; Esc (or *clear latched*) releases them.
 - **Encoders:** mouse wheel or drag. Click the letter under a knob to push it.
+- **Master Volume** (top left): mouse wheel or drag. A software gain on
+  the live output and on PLAY's replay, from silent up to 1.5× (which can
+  clip). The real knob is analog, so the firmware never sees it.
 - **Audio:** MUTE silences the live output. PLAY replays what has been
   recorded, CLEAR empties the recording, and SAVE WAV writes it to a file.
 - **LOAD SAMPLES** (Digitakt only): see below.
 
-The Digitone window has the Digitone's layout: the six parameter-page keys
-(TRIG, SYN1, SYN2, FLTR, AMP, LFO) down the right, T1–T4 and MIDI down the
-left, LEVEL/DATA beside the eight encoders. The Digitone has no sample
-engine, so it has no LOAD SAMPLES.
+Both windows share one plan: Master Volume and LEVEL/DATA at the top
+left, the screen, the eight encoders, and one row of keys under them with
+the parameter pages and PAGE. The Digitone window has its own
+keys (SYN1, SYN2, VOICE, KEYBOARD, T1–T4, MIDI). The Digitone has no
+sample engine, so it has no LOAD SAMPLES.
 
 ### Loading samples
 
