@@ -165,6 +165,7 @@ EXIT_NEEDS_YES = 4      # untested release, and --yes was not given
 EXIT_BUSY = 5           # another process holds this firmware folder
 EXIT_UNSUPPORTED = 6    # recognised product, not supported in this version
 EXIT_INCOMPATIBLE = 7   # panel worker: snapshot from another build; rebuild
+EXIT_SAMPLES_ADDED = 8  # panel worker: LOAD SAMPLES changed the card; rebuild
 
 # dtpanel.main's codes this module acts on: 2, the card was flushed but the
 # session not saved; 4 (emu.dtpanel.INCOMPATIBLE, used when a stand-in or a
@@ -172,6 +173,7 @@ EXIT_INCOMPATIBLE = 7   # panel worker: snapshot from another build; rebuild
 DTPANEL_NOT_SAVED = 2
 DTPANEL_INCOMPATIBLE = 4
 DTPANEL_LOAD_FAILED = 5     # the snapshot could not be opened (emu.dtpanel)
+DTPANEL_SAMPLES_ADDED = 6   # LOAD SAMPLES wrote to the card (emu.dtpanel)
 
 # Atomic writes retry a rename Windows refuses while another process (a
 # second launcher, --list, a virus scanner) has the target open.
@@ -1608,6 +1610,8 @@ def _run_panel(paths, b, snap, log):
       - dtpanel's LOAD_FAILED on resume.snap (damaged, truncated): dropped,
         so the next Play falls back to gui.snap, or offers a rebuild if the
         card has moved on since -- instead of failing on it every time;
+      - dtpanel's SAMPLES_ADDED: dropped. The session was saved, but then
+        samples went onto the card, and only a rebuild can show them;
       - anything else, e.g. a halt (the emulator neither flushes nor saves
         then): kept. The last session and the card still agree, and
         dropping it would turn the next Play into a rebuild.
@@ -1619,7 +1623,8 @@ def _run_panel(paths, b, snap, log):
     try:
         panel = _dtpanel()
         incompat_code = getattr(panel, 'INCOMPATIBLE', DTPANEL_INCOMPATIBLE)
-        rc = panel.main([snap, '--syx', paths.syx, '--save-on-exit', paths.resume])
+        rc = panel.main([snap, '--syx', paths.syx, '--save-on-exit',
+                         paths.resume, '--app'])
         rc = EXIT_OK if rc is None else int(rc)
     except BaseException:
         log.write(traceback.format_exc())
@@ -1641,6 +1646,10 @@ def _run_panel(paths, b, snap, log):
             state.pop('resume', None)
             what = ('dropped the resume stamp (resume.snap would not open; '
                     'the next Play starts from the last full setup)')
+        elif rc == DTPANEL_SAMPLES_ADDED:
+            state.pop('resume', None)
+            what = ('dropped the resume stamp (samples were loaded onto the '
+                    'card: rebuild)')
         elif rc == DTPANEL_NOT_SAVED or moved:
             state.pop('resume', None)
             what = 'dropped the resume stamp (%s)' % (
@@ -1668,7 +1677,9 @@ def worker_panel(fwdir, err=None):
 
     -> dtpanel's exit code (0 clean, 1 emulator failed, 2 saving failed),
     EXIT_INCOMPATIBLE for dtpanel's INCOMPATIBLE (the snapshot is from
-    another build: rebuild), or EXIT_NOT_READY with the reason
+    another build: rebuild), EXIT_SAMPLES_ADDED for its SAMPLES_ADDED
+    (samples went onto the card: rebuild, then reopen), or EXIT_NOT_READY
+    with the reason
     ('card-changed', 'not-built') on stderr and in logs/panel.log,
     EXIT_BUSY, EXIT_UNSUPPORTED."""
     err = sys.stderr if err is None else err
@@ -1702,6 +1713,8 @@ def worker_panel(fwdir, err=None):
             rc, incompatible = _run_panel(paths, b, snap, log)
             if incompatible:
                 return EXIT_INCOMPATIBLE
+            if rc == DTPANEL_SAMPLES_ADDED:
+                return EXIT_SAMPLES_ADDED
             # dtpanel's 5 would read as EXIT_BUSY here; it is a failure.
             return EXIT_FAILED if rc == DTPANEL_LOAD_FAILED else rc
     except Busy as exc:
@@ -2173,6 +2186,7 @@ class Job:
     kind: str
     proc: object
     dialog: object = None
+    open_after: bool = False    # a build: open the panel when it is ready
 
 
 class BuildDialog:
@@ -2520,7 +2534,7 @@ class Launcher:
             self.tree.selection_set(rel.slug)
         self.start_build(paths.root, rel.label)
 
-    def start_build(self, fwdir, label, rebuild=False):
+    def start_build(self, fwdir, label, rebuild=False, open_after=False):
         job = self.jobs.get(fwdir)
         if job is not None:
             if job.dialog is not None:
@@ -2536,7 +2550,7 @@ class Launcher:
         self.log.info('first-run worker pid %s for %s%s', proc.pid, fwdir,
                       ' (rebuild)' if rebuild else '')
         dialog = BuildDialog(self, fwdir, label, proc)
-        self.jobs[fwdir] = Job('first-run', proc, dialog)
+        self.jobs[fwdir] = Job('first-run', proc, dialog, open_after)
         threading.Thread(target=self._read_worker, args=(fwdir, proc),
                          daemon=True).start()
         self.refresh()
@@ -2615,7 +2629,8 @@ class Launcher:
         info = status_of(fwdir)
         if job.dialog.ok and info['status'] == READY:
             job.dialog.close()
-            if self.mb.askyesno('Ready', '%s is ready. Open it now?' % info['label']):
+            if job.open_after or self.mb.askyesno(
+                    'Ready', '%s is ready. Open it now?' % info['label']):
                 self.start_panel(info)
 
     def _panel_exited(self, fwdir, rc):
@@ -2633,6 +2648,12 @@ class Launcher:
         elif rc == EXIT_INCOMPATIBLE:
             info = dict(status_of(fwdir), reason=INCOMPATIBLE_REASON)
             self._offer_rebuild(info)
+        elif rc == EXIT_SAMPLES_ADDED:
+            # The panel asked before it closed: rebuild with the samples on
+            # the card and open it again, without asking twice.
+            info = status_of(fwdir)
+            self.start_build(fwdir, info['label'], rebuild=True,
+                             open_after=True)
         elif rc == EXIT_USAGE:
             self.mb.showwarning('Session not saved',
                                 'The panel closed, but its state could not be '

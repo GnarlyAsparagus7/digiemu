@@ -304,7 +304,9 @@ class Emulator(threading.Thread):
     `finishing` is set once the run loop has ended at a step boundary and
     the card flush and save have begun -- work a caller must wait for rather
     than abandon on a timeout. `saved` is the path once it is written;
-    `save_error` says why it was not.
+    `save_error` says why it was not. `flushed` is True once a clean stop
+    has written the card's changes to its file; with `release_card` set
+    beforehand, the stop then also closes the card (see _stop_cleanly).
     """
 
     daemon = True
@@ -321,6 +323,10 @@ class Emulator(threading.Thread):
         self.saved = None
         self.save_error = None
         self.finishing = threading.Event()
+        # Set before stop_flag to have a clean stop close the card once it
+        # is flushed (and the session saved); `flushed` says it was.
+        self.release_card = False
+        self.flushed = False
         # Record the audio output, for a device whose [audio] path is
         # modelled. See _start_audio.
         self.audio_wanted = audio
@@ -1056,30 +1062,40 @@ class Emulator(threading.Thread):
                 except UcError:
                     pass
         else:
-            self.finishing.set()
-            self.stats['status'] = 'stopped'
-            # The card's writes reach its image file only at flush; a stop is
-            # the last chance before the process exits.
-            flushed = False
-            try:
-                esd = ev.get('esdhc')
-                if esd is not None:
-                    esd.card.flush()
-                flushed = True
-            except Exception as exc:                       # noqa: BLE001
-                print('[gui] +Drive image flush failed: %s' % exc, flush=True)
-                self.save_error = '+Drive image flush failed: %s' % exc
-            # Only after a good flush: a snapshot is half of a pair with the
-            # card file, and saving one the file does not match is exactly
-            # the stale pairing save_on_exit exists to prevent.
-            if self.save_on_exit and flushed:
-                self._save_session(m, ev, st, pits)
+            self._stop_cleanly(m, ev, st, pits)
         self._close_live()
         n_seen = len(m.fault_pages)
         n_kept = len(m.faults)
         capped = ' (truncated at max_fault_records)' if n_kept < n_seen else ''
         print('[gui] faults: %d distinct pages touched, %d records kept%s'
               % (n_seen, n_kept, capped), flush=True)
+
+    def _stop_cleanly(self, m, ev, st, pits):
+        """The run loop ended at a step boundary because stop_flag was set:
+        flush the card, save the session (save_on_exit), and with
+        release_card close the card, in that order."""
+        self.finishing.set()
+        self.stats['status'] = 'stopped'
+        # The card's writes reach its image file only at flush; a stop is
+        # the last chance before the process exits.
+        esd = ev.get('esdhc')
+        try:
+            if esd is not None:
+                esd.card.flush()
+            self.flushed = True
+        except Exception as exc:                       # noqa: BLE001
+            print('[gui] +Drive image flush failed: %s' % exc, flush=True)
+            self.save_error = '+Drive image flush failed: %s' % exc
+        # Only after a good flush: a snapshot is half of a pair with the
+        # card file, and saving one the file does not match is exactly
+        # the stale pairing save_on_exit exists to prevent.
+        if self.save_on_exit and self.flushed:
+            self._save_session(m, ev, st, pits)
+        # Last, once nothing of this machine will touch the card again: the
+        # map pins the file until the Machine is collected, and whoever asked
+        # (the panel, adding samples) is about to write it.
+        if self.release_card and self.flushed and esd is not None:
+            esd.card.close()
 
     def _save_session(self, m, ev, st, pits):
         """Save the stopped machine to save_on_exit, atomically. -> bool.

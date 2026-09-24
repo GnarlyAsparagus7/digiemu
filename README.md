@@ -32,6 +32,12 @@ firmware has installed its factory project and sounds onto that card. After
 that, **Play** opens the panel straight away. Quitting saves the session, so
 the next Play carries on where you left off.
 
+**LOAD SAMPLES** in the panel's header picks one or more WAV files and puts
+them in `/incoming` on the +Drive, ready to load into a project. The
+firmware only reads the card's index when it boots, so the app saves and
+closes the session, writes the samples, rebuilds (about 15 s) and reopens
+the panel. Project changes that are not saved on the Digitakt may be lost.
+
 Everything lives next to the exe, in `firmware\<name>\`: your `.syx`, the
 card image and the snapshots. Move or copy the folder freely, but never share
 what is inside `firmware\`, which is derived from your firmware. **Rebuild**
@@ -98,9 +104,12 @@ With no argument it opens `gui.snap`. Click a key to press it. Shift-click
 latches a key, for combinations like FUNC + key, and Esc releases latched
 keys. Turn a knob with the mouse wheel or by dragging. The header has MUTE,
 PLAY, CLEAR and SAVE WAV for the audio; `--no-audio` skips the audio model.
+LOAD SAMPLES writes WAV files to the card and closes the window; run on its
+own, the panel leaves rebuilding the snapshots to you.
 
-To put samples on the +Drive, close the emulator (it keeps the card image
-mapped) and add them to the image; they appear in `/incoming`:
+To put samples on the +Drive by hand, close the emulator (it keeps the card
+image mapped) and add them to the image; they appear in `/incoming` once the
+snapshots are rebuilt from the cold boot:
 
 ```sh
 uv run python tools/ekfsadd.py plusdrive.img kick.wav snare.wav

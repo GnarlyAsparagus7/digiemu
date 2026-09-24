@@ -33,6 +33,14 @@ closed: the emulator stops at a step boundary, the +Drive image is flushed,
 and the snapshot is written to PATH.tmp and renamed over PATH. Closing waits
 for that however long it takes; a save abandoned half way is a lost session.
 
+SAMPLES. LOAD SAMPLES opens a file dialog for one or more WAV files and puts
+them in the +Drive's /incoming (emu/samples.py). The firmware indexes the card
+only when it boots, so the running session cannot see them: once the files
+check out, the session is saved and closed, the samples are written, and the
+panel returns SAMPLES_ADDED. Under the portable app (--app) the app then
+rebuilds from the cold boot (~15 s) and reopens the panel; run on its own,
+the snapshots have to be rebuilt by hand.
+
 FAILURES are shown, not swallowed: a snapshot that will not open, an
 unrecognised firmware, a halt -- the emulator's `error` is drawn over the
 screen and on the status line, and main() says so in its return code. A
@@ -41,7 +49,7 @@ its own case, INCOMPATIBLE: nothing failed, the snapshot has to be made
 again, and the portable app offers that instead of reporting a crash.
 
     uv run python -m emu.dtpanel [snapshot] [--syx PATH]
-                                 [--save-on-exit PATH] [--no-audio]
+                                 [--save-on-exit PATH] [--no-audio] [--app]
 """
 import argparse
 import math
@@ -72,6 +80,9 @@ INCOMPATIBLE = 4
 # not be opened at all, for another reason -- a truncated or damaged file,
 # say. Distinct from 1 so a launcher can stop offering that snapshot.
 LOAD_FAILED = 5
+# 6: LOAD SAMPLES wrote samples to the card, so every snapshot predates it:
+# rebuild from the cold boot (the portable app does, then reopens).
+SAMPLES_ADDED = 6
 # For arguments it cannot parse. 2 is argparse's usual choice, but here 2
 # already means "the session was not saved".
 USAGE_ERROR = 64
@@ -175,8 +186,11 @@ class DigitaktPanel(tk.Tk):
     # _wait_for_worker.
     STOP_TIMEOUT = 5.0
 
-    def __init__(self, snapshot, syx=None, audio=True, save_on_exit=None):
+    def __init__(self, snapshot, syx=None, audio=True, save_on_exit=None,
+                 app=False):
         super().__init__()
+        self.app = app                   # run by the portable app
+        self.samples_added = []          # names LOAD SAMPLES wrote
         self.title('digiemu — Digitakt mk1 emulator (unofficial)')
         self.configure(bg=BG)
         self.canvas = tk.Canvas(self, width=PANEL_W, height=PANEL_H, bg=BG,
@@ -267,8 +281,6 @@ class DigitaktPanel(tk.Tk):
         c.create_text(170, 45, text='Digitakt mk1 emulator · unofficial, not '
                       'affiliated with Elektron', fill=DIM,
                       font=('Helvetica', 11), anchor='w')
-        c.create_text(1128, 45, text='Project: 001    120.0', fill=TEXT,
-                      font=('Helvetica', 11), anchor='e')
         self._rr(24, 88, W * SCALE + 28, H * SCALE + 28, 8,
                  fill='#05070a', outline='#39414d')
         c.create_image(SCREEN_X, SCREEN_Y, image=self.big, anchor='nw')
@@ -308,6 +320,12 @@ class DigitaktPanel(tk.Tk):
             for item in (rect, txt):
                 c.tag_bind(item, '<Button-1>', lambda _e, f=fn: f())
             self.audio_btns[name] = (rect, txt)
+        x, w = 1000, 128
+        rect = self._rr(x, 30, w, 26, 6, fill=FACE, outline=EDGE)
+        txt = c.create_text(x + w / 2, 43, text='LOAD SAMPLES', fill=TEXT,
+                            font=('Helvetica', 9, 'bold'))
+        for item in (rect, txt):
+            c.tag_bind(item, '<Button-1>', lambda _e: self.load_samples())
 
     def _note(self, msg, secs=4.0):
         self._audio_note = (msg, time.time() + secs)
@@ -619,7 +637,89 @@ class DigitaktPanel(tk.Tk):
             self.canvas.itemconfigure(
                 dot, fill=_hex(rgb) if rgb else LED_OFF)
 
+    # --------------------------------------------------------------- samples
+    def load_samples(self):
+        """LOAD SAMPLES: WAV files into the +Drive's /incoming. See SAMPLES
+        in the module docstring. Nothing is stopped until the files have
+        been checked and the user has confirmed; a file that cannot go on
+        the card is named and left out."""
+        from tkinter import filedialog, messagebox
+        from emu import samples
+        title = 'Load samples'
+        emu = self.emu
+        card = os.environ.get('DT2_PLUSDRIVE')
+        if not card:
+            messagebox.showinfo(title, 'This session has no +Drive image to '
+                                'load samples onto.', parent=self)
+            return
+        if not emu.ready.is_set() or self._failure() or not emu.is_alive():
+            messagebox.showinfo(title, 'Samples can be loaded once the '
+                                'Digitakt is running.', parent=self)
+            return
+        files = filedialog.askopenfilenames(
+            parent=self, title='Load samples onto the +Drive',
+            filetypes=samples.WAV_TYPES)
+        if not files:
+            return
+        try:
+            plan = samples.plan(list(files), card)
+        except samples.Error as exc:
+            messagebox.showerror(title, 'No samples can go on the +Drive: '
+                                 '%s.' % exc, parent=self)
+            return
+        if not plan.samples:
+            messagebox.showerror(title, 'None of these can go on the +Drive:'
+                                 '\n\n%s' % _rejections(plan), parent=self)
+            return
+        if not messagebox.askokcancel(title, load_question(plan, self.app),
+                                      parent=self):
+            return
+        emu.release_card = True
+        self._stop_emulator('saving the session before loading the samples')
+        if emu.is_alive() or not emu.flushed:
+            messagebox.showerror(title, 'The +Drive image could not be '
+                                 'written safely (%s), so no samples were '
+                                 'loaded.' % (emu.save_error or 'the emulator '
+                                              'did not stop'), parent=self)
+            self._close_soon()
+            return
+        try:
+            samples.write(plan, progress=lambda s: self._say(
+                'loading %s onto the +Drive ...' % s.name, AMBER))
+        except Exception as exc:                       # noqa: BLE001
+            print('[dtpanel] loading samples failed: %s' % exc, flush=True)
+            messagebox.showerror(title, 'Loading stopped: %s. %d of %d '
+                                 'samples were loaded.'
+                                 % (exc, len(plan.written),
+                                    len(plan.samples)), parent=self)
+        self.samples_added = [name for name, _ino in plan.written]
+        print('[dtpanel] loaded %d sample(s) into /%s on %s: %s'
+              % (len(plan.written), samples.INCOMING, card,
+                 ', '.join(self.samples_added) or '-'), flush=True)
+        self._close_soon()
+
+    def _close_soon(self):
+        """Close the window once the current event is over, never from
+        inside it. LOAD SAMPLES runs from a canvas item's <Button-1>
+        binding; destroying the window there frees the canvas while Tk is
+        still dispatching that click, and Tk then walks freed memory: Tcl
+        panics with 'alloc: invalid block' and the process dies with
+        0x80000003 (measured, frozen and from source)."""
+        self.after_idle(self.destroy)
+
     # -------------------------------------------------------------- shutdown
+    def _stop_emulator(self, why=None):
+        """Stop the emulator thread at a step boundary and wait for its
+        flush (and save, with save_on_exit). -> True once it has ended."""
+        emu = getattr(self, 'emu', None)
+        if emu is None or not emu.is_alive():
+            return True
+        emu.stop_flag.set()
+        emu.pause.clear()
+        if why:
+            self._say(why, AMBER)
+        return self._wait_for_worker(emu)
+
     def quit_all(self):
         """Stop the emulator thread, then tear the window down.
 
@@ -630,13 +730,9 @@ class DigitaktPanel(tk.Tk):
         if player is not None:
             player.stop()
         emu = getattr(self, 'emu', None)
-        if emu is not None and emu.is_alive():
-            emu.stop_flag.set()
-            emu.pause.clear()
-            if getattr(emu, 'save_on_exit', None):
-                self._say('saving the session -- this window closes when '
-                          'it is written', AMBER)
-            self._wait_for_worker(emu)
+        self._stop_emulator(
+            'saving the session -- this window closes when it is written'
+            if getattr(emu, 'save_on_exit', None) else None)
         try:
             self.destroy()
         except tk.TclError:          # already torn down
@@ -677,7 +773,12 @@ class DigitaktPanel(tk.Tk):
     def exit_code(self):
         """-> main()'s return code: 0 clean, 1 emulator failed, 2 not saved,
         4 (INCOMPATIBLE) the snapshot is from another build, 5 (LOAD_FAILED)
-        the snapshot could not be opened."""
+        the snapshot could not be opened, 6 (SAMPLES_ADDED) LOAD SAMPLES
+        changed the card."""
+        # First: whatever else happened, the card now holds files no
+        # snapshot knows about, and only a rebuild can show them.
+        if getattr(self, 'samples_added', None):
+            return SAMPLES_ADDED
         emu = self.emu
         # Before `error`, which is also set: the launcher offers a rebuild
         # for this one rather than reporting a failure.
@@ -801,6 +902,40 @@ class DigitaktPanel(tk.Tk):
         self.canvas.itemconfigure(self.status, text=text, fill=DIM)
 
 
+def _rejections(plan, limit=12):
+    lines = ['%s: %s' % (os.path.basename(path), why)
+             for path, why in plan.rejected[:limit]]
+    if len(plan.rejected) > limit:
+        lines.append('... and %d more' % (len(plan.rejected) - limit))
+    return '\n'.join(lines)
+
+
+def load_question(plan, app, limit=12):
+    """-> LOAD SAMPLES' confirmation text for `plan` (emu.samples.Plan)."""
+    n = len(plan.samples)
+    lines = ['Load %d sample%s into /incoming on the +Drive?'
+             % (n, '' if n == 1 else 's'), '']
+    for s in plan.samples[:limit]:
+        lines.append('    %s%s  (%.2f s, %d Hz)'
+                     % (s.name, '  [renamed: that name is taken]'
+                        if s.renamed else '', s.seconds, s.rate))
+    if n > limit:
+        lines.append('    ... and %d more' % (n - limit))
+    if plan.rejected:
+        lines += ['', 'Left out:', _rejections(plan, limit)]
+    lines += ['', 'The Digitakt only sees new samples after a restart, so '
+              'this session is saved and closed first.']
+    if app:
+        lines.append('digiemu then rebuilds it with the samples on the '
+                     '+Drive and opens it again, in about 15 seconds.')
+    else:
+        lines.append('The window closes; rebuild the snapshots to see the '
+                     'samples.')
+    lines.append('Changes to the project that are not saved on the Digitakt '
+                 'may be lost.')
+    return '\n'.join(lines)
+
+
 class _Stop(Exception):
     """argparse asked to exit; main() returns `code` instead."""
 
@@ -825,7 +960,8 @@ class _Parser(argparse.ArgumentParser):
 
 
 def parse_args(argv):
-    """-> Namespace(snapshot, syx, save_on_exit, audio). Raises _Stop."""
+    """-> Namespace(snapshot, syx, save_on_exit, audio, app). Raises
+    _Stop."""
     ap = _Parser(prog='python -m emu.dtpanel',
                  description='The Digitakt mk1 front panel.')
     ap.add_argument('snapshot', nargs='?',
@@ -842,6 +978,9 @@ def parse_args(argv):
     # audio DMA is not set up (the window says so either way).
     ap.add_argument('--no-audio', dest='audio', action='store_false',
                     help='skip the audio model')
+    ap.add_argument('--app', action='store_true',
+                    help='run by the portable app, which rebuilds and '
+                         'reopens after LOAD SAMPLES')
     args = ap.parse_args(argv)
     if args.legacy_syx:
         if args.syx and args.syx != args.legacy_syx:
@@ -860,8 +999,9 @@ def main(argv):
     halted or crashed); 2 if the session could not be saved; 4
     (INCOMPATIBLE) if the snapshot was made by a different build -- rebuild
     needed; 5 (LOAD_FAILED) if the snapshot, the firmware or the device
-    files could not be opened; 64 (USAGE_ERROR) for arguments it cannot
-    parse.
+    files could not be opened; 6 (SAMPLES_ADDED) if LOAD SAMPLES put samples
+    on the card -- rebuild to see them; 64 (USAGE_ERROR) for arguments it
+    cannot parse.
     """
     try:
         args = parse_args(argv)
@@ -886,7 +1026,7 @@ def main(argv):
             print('[dtpanel] %s' % exc, flush=True)
             return 1
     app = DigitaktPanel(snap, syx=args.syx, audio=args.audio,
-                        save_on_exit=args.save_on_exit)
+                        save_on_exit=args.save_on_exit, app=args.app)
     try:
         app.mainloop()
     finally:
@@ -894,7 +1034,11 @@ def main(argv):
         # all bypass WM_DELETE_WINDOW and would leave the worker inside
         # Unicorn while the interpreter frees it.
         app.quit_all()
-    return app.exit_code()
+    code = app.exit_code()
+    if code == SAMPLES_ADDED and not args.app:
+        print('[dtpanel] the snapshots predate the new samples: rebuild them '
+              'from the cold boot to see them on the Digitakt', flush=True)
+    return code
 
 
 if __name__ == '__main__':

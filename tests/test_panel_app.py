@@ -662,9 +662,10 @@ class _FakePanel:
     made = []
     code = 0
 
-    def __init__(self, snapshot, syx=None, audio=True, save_on_exit=None):
+    def __init__(self, snapshot, syx=None, audio=True, save_on_exit=None,
+                 app=False):
         self.args = dict(snapshot=snapshot, syx=syx, audio=audio,
-                         save_on_exit=save_on_exit)
+                         save_on_exit=save_on_exit, app=app)
         self.env_card = os.environ.get('DT2_PLUSDRIVE')
         self.quit = 0
         _FakePanel.made.append(self)
@@ -707,7 +708,8 @@ class MainTest(Quiet):
         panel, = _FakePanel.made
         self.assertEqual(panel.args, dict(snapshot='/abs/gui.snap',
                                           syx='/abs/fw.syx', audio=True,
-                                          save_on_exit='/abs/resume.snap'))
+                                          save_on_exit='/abs/resume.snap',
+                                          app=False))
         self.assertEqual(panel.quit, 1)
 
     def test_returns_the_panels_exit_code(self):
@@ -748,6 +750,17 @@ class MainTest(Quiet):
                                            '/abs/fw.syx', '--save-on-exit',
                                            '/abs/resume.snap'), want)
         self.assertEqual(self.dtpanel.INCOMPATIBLE, 4)
+
+    def test_app_and_loaded_samples(self):
+        _FakePanel.code = self.dtpanel.SAMPLES_ADDED
+        with mock.patch('sys.stdout', new_callable=io.StringIO) as out:
+            self.assertEqual(self.main('gui.snap', '--app'), 6)
+        self.assertTrue(_FakePanel.made[0].args['app'])
+        self.assertNotIn('rebuild', out.getvalue())
+        with mock.patch('sys.stdout', new_callable=io.StringIO) as out:
+            self.assertEqual(self.main('gui.snap'), 6)
+        self.assertFalse(_FakePanel.made[1].args['app'])
+        self.assertIn('rebuild them from the cold boot', out.getvalue())
 
     def test_an_explicit_card_is_never_replaced(self):
         self.main('gui.snap', env={'DT2_PLUSDRIVE': '/abs/card.img'})
@@ -804,6 +817,274 @@ class _FakeWorker(threading.Thread):
         self.saved = self.save_on_exit
 
 
+class _SampleWorker(_FakeWorker):
+    """_FakeWorker plus the card side of a clean stop: `flushed`, and the
+    `release_card` the panel sets before stopping."""
+
+    def __init__(self, flush=True, **kw):
+        super().__init__(**kw)
+        self.flush_ok = flush
+        self.flushed = False
+        self.release_card = False
+        self.save_error = None
+        self.released_at_stop = None
+
+    def run(self):
+        super().run()
+        self.released_at_stop = self.release_card
+        if self.flush_ok:
+            self.flushed = True
+        else:
+            self.saved = None
+            self.save_error = '+Drive image flush failed: disk full'
+
+
+@NEEDS_GUI
+class LoadSamplesTest(Quiet):
+    """LOAD SAMPLES: check first, then save and stop, then write, then
+    SAMPLES_ADDED -- and nothing stopped when there is nothing to load."""
+
+    def setUp(self):
+        super().setUp()
+        from emu import dtpanel, samples
+        self.dtpanel, self.samples = dtpanel, samples
+        cls = dtpanel.DigitaktPanel
+
+        class Window:
+            STOP_TIMEOUT = 2.0
+            load_samples = cls.load_samples
+            _close_soon = cls._close_soon
+            quit_all = cls.quit_all
+            _stop_emulator = cls._stop_emulator
+            _wait_for_worker = cls._wait_for_worker
+            exit_code = cls.exit_code
+            _failure = cls._failure
+
+            def __init__(self, emu, app=True):
+                self.emu, self.player, self.app = emu, None, app
+                self.samples_added = []
+                self.said, self.destroyed, self.idle = [], 0, []
+
+            def _say(self, text, fill=None):
+                self.said.append(text)
+
+            def destroy(self):
+                self.destroyed += 1
+
+            def after_idle(self, fn):
+                self.idle.append(fn)
+
+        self.Window = Window
+        self.calls = []
+        self.picked = ('C:/s/kick.wav', 'C:/s/snare.wav')
+        self.answer = True
+        self.plan_result = None
+        self.plan_error = None
+        self.write_error = None
+        env = mock.patch.dict(os.environ, {'DT2_PLUSDRIVE': 'C:/fw/plusdrive.img'})
+        env.start()
+        self.addCleanup(env.stop)
+        for target, fn in (
+                ('tkinter.filedialog.askopenfilenames', self._pick),
+                ('tkinter.messagebox.askokcancel', self._ask),
+                ('tkinter.messagebox.showerror', self._shown('showerror')),
+                ('tkinter.messagebox.showinfo', self._shown('showinfo')),
+                ('emu.samples.plan', self._plan),
+                ('emu.samples.write', self._write)):
+            p = mock.patch(target, fn)
+            p.start()
+            self.addCleanup(p.stop)
+
+    # -- stand-ins -------------------------------------------------------
+    def _pick(self, **kw):
+        self.calls.append(('pick', kw.get('filetypes')))
+        return self.picked
+
+    def _ask(self, title, text, **kw):
+        self.calls.append(('ask', text))
+        return self.answer
+
+    def _shown(self, kind):
+        def show(title, text, **kw):
+            self.calls.append((kind, text))
+        return show
+
+    def _plan(self, files, card):
+        self.calls.append(('plan', tuple(files), card))
+        if self.plan_error:
+            raise self.plan_error
+        if self.plan_result is not None:
+            return self.plan_result
+        p = self.samples.Plan(card)
+        p.samples = [self.samples.Sample(f, os.path.basename(f)[:-4], 48000,
+                                         4800, 1) for f in files]
+        return p
+
+    def _write(self, plan, progress=None):
+        emu = self.win.emu
+        self.calls.append(('write', emu.is_alive(), emu.released_at_stop,
+                           emu.saved))
+        for s in plan.samples:
+            progress(s)
+            if self.write_error and plan.written:
+                raise self.write_error
+            plan.written.append((s.name, 10 + len(plan.written)))
+        return plan.written
+
+    def window(self, worker=None, app=True):
+        worker = worker or _SampleWorker()
+        self.addCleanup(worker.release.set)
+        worker.start()
+        worker.ready.wait(5)
+        self.win = self.Window(worker, app)
+        return self.win
+
+    def kinds(self):
+        return [c[0] for c in self.calls]
+
+    # -- tests -----------------------------------------------------------
+    def test_saves_stops_writes_and_asks_for_a_rebuild(self):
+        win = self.window()
+        win.load_samples()
+        self.assertEqual(self.kinds(), ['pick', 'plan', 'ask', 'write'])
+        self.assertEqual(self.calls[0][1], self.samples.WAV_TYPES)
+        self.assertEqual(self.calls[1][2], 'C:/fw/plusdrive.img')
+        # Written only once the emulator had stopped, saved the session and
+        # been asked to let go of the card.
+        self.assertEqual(self.calls[3][1:], (False, True, 'resume.snap'))
+        self.assertEqual(win.samples_added, ['kick', 'snare'])
+        # Closed after the click, never inside it: destroying the window
+        # from the canvas binding that ran this made Tcl panic ('alloc:
+        # invalid block', 0x80000003).
+        self.assertEqual((win.destroyed, win.idle), (0, [win.destroy]))
+        win.idle.pop()()
+        self.assertEqual(win.destroyed, 1)
+        self.assertEqual(win.exit_code(), self.dtpanel.SAMPLES_ADDED)
+        self.assertTrue(any('loading snare' in t for t in win.said))
+
+    def test_nothing_picked_or_cancelled_changes_nothing(self):
+        win = self.window()
+        self.picked = ''
+        win.load_samples()
+        self.answer = False
+        self.picked = ('C:/s/kick.wav',)
+        win.load_samples()
+        self.assertEqual(self.kinds(), ['pick', 'pick', 'plan', 'ask'])
+        self.assertTrue(win.emu.is_alive())
+        self.assertEqual((win.samples_added, win.destroyed), ([], 0))
+        win.quit_all()
+        self.assertEqual(win.exit_code(), 0)
+
+    def test_files_that_cannot_go_on_stop_nothing(self):
+        win = self.window()
+        p = self.samples.Plan('card')
+        p.rejected = [('C:/s/notes.wav', 'not a RIFF/WAVE file')]
+        self.plan_result = p
+        win.load_samples()
+        self.assertEqual(self.kinds(), ['pick', 'plan', 'showerror'])
+        self.assertIn('notes.wav: not a RIFF/WAVE file', self.calls[-1][1])
+        self.plan_error = self.samples.Error('the +Drive has no /incoming folder')
+        win.load_samples()
+        self.assertIn('no /incoming', self.calls[-1][1])
+        self.assertTrue(win.emu.is_alive())
+        self.assertEqual(win.destroyed, 0)
+
+    def test_needs_a_card_and_a_running_emulator(self):
+        with mock.patch.dict(os.environ, {'DT2_PLUSDRIVE': ''}):
+            self.window().load_samples()
+        self.assertEqual(self.kinds(), ['showinfo'])
+        self.assertIn('no +Drive image', self.calls[0][1])
+        loading = _SampleWorker(load=5.0)
+        self.addCleanup(loading.release.set)
+        loading.start()
+        self.Window(loading).load_samples()
+        self.assertEqual(self.kinds(), ['showinfo', 'showinfo'])
+        self.assertIn('once the Digitakt is running', self.calls[1][1])
+
+    def test_a_card_that_did_not_flush_gets_nothing(self):
+        win = self.window(_SampleWorker(flush=False))
+        win.load_samples()
+        self.assertEqual(self.kinds(), ['pick', 'plan', 'ask', 'showerror'])
+        self.assertIn('flush failed', self.calls[-1][1])
+        self.assertEqual(win.samples_added, [])
+        self.assertEqual((win.destroyed, win.idle), (0, [win.destroy]))
+        self.assertNotEqual(win.exit_code(), self.dtpanel.SAMPLES_ADDED)
+
+    def test_a_write_that_fails_part_way_still_asks_for_a_rebuild(self):
+        win = self.window()
+        self.write_error = OSError('disk full')
+        win.load_samples()
+        self.assertEqual(self.kinds(), ['pick', 'plan', 'ask', 'write',
+                                        'showerror'])
+        self.assertIn('1 of 2', self.calls[-1][1])
+        self.assertEqual(win.samples_added, ['kick'])
+        self.assertEqual(win.exit_code(), self.dtpanel.SAMPLES_ADDED)
+
+    def test_the_question_says_what_happens_next(self):
+        p = self.samples.Plan('card')
+        p.samples = [self.samples.Sample('a/kick.wav', 'kick', 44100, 44100, 6),
+                     self.samples.Sample('b/kick.wav', 'kick-2', 48000, 24000,
+                                         3, renamed=True)]
+        p.rejected = [('c/x.txt', 'not a RIFF/WAVE file')]
+        app = self.dtpanel.load_question(p, app=True)
+        self.assertIn('Load 2 samples into /incoming', app)
+        self.assertIn('kick  (1.00 s, 44100 Hz)', app)
+        self.assertIn('kick-2  [renamed: that name is taken]  (0.50 s', app)
+        self.assertIn('x.txt: not a RIFF/WAVE file', app)
+        self.assertIn('rebuilds it', app)
+        alone = self.dtpanel.load_question(p, app=False)
+        self.assertIn('rebuild the snapshots', alone)
+        self.assertNotIn('rebuilds it', alone)
+
+
+class StopCleanlyTest(Quiet):
+    """The emulator's clean stop: flush, save, then -- only when asked and
+    only after a good flush -- close the card."""
+
+    def setUp(self):
+        super().setUp()
+        from emu import gui
+        self.order = []
+        self.emu = gui.Emulator('gui.snap', save_on_exit='resume.snap')
+        self.emu._save_session = lambda *a: self.order.append('save')
+        order = self.order
+
+        class Card:
+            fail = False
+
+            def flush(self):
+                order.append('flush')
+                if self.fail:
+                    raise OSError('disk full')
+
+            def close(self):
+                order.append('close')
+
+        self.card = Card()
+        self.ev = {'esdhc': types.SimpleNamespace(card=self.card)}
+
+    def stop(self):
+        self.emu._stop_cleanly(None, self.ev, {}, None)
+
+    def test_the_card_stays_open_unless_asked(self):
+        self.stop()
+        self.assertEqual(self.order, ['flush', 'save'])
+        self.assertTrue(self.emu.flushed and self.emu.finishing.is_set())
+
+    def test_released_after_the_save(self):
+        self.emu.release_card = True
+        self.stop()
+        self.assertEqual(self.order, ['flush', 'save', 'close'])
+
+    def test_a_failed_flush_neither_saves_nor_releases(self):
+        self.emu.release_card = True
+        self.card.fail = True
+        self.stop()
+        self.assertEqual(self.order, ['flush'])
+        self.assertFalse(self.emu.flushed)
+        self.assertIn('flush failed', self.emu.save_error)
+
+
 @NEEDS_GUI
 class CloseTest(Quiet):
     """quit_all waits for a save; it gives up only on a stuck step."""
@@ -816,6 +1097,7 @@ class CloseTest(Quiet):
         class Window:
             STOP_TIMEOUT = 0.2
             quit_all = cls.quit_all
+            _stop_emulator = cls._stop_emulator
             _wait_for_worker = cls._wait_for_worker
             exit_code = cls.exit_code
             _failure = cls._failure

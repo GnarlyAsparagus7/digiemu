@@ -86,8 +86,8 @@ PRIVATE_MODULES = (
 APP_MODULES = (
     'emu.portable', 'emu.bootstrap', 'emu.release', 'emu.dtpanel', 'emu.gui',
     'emu.ekfsformat', 'emu.uiresume', 'emu.checkpoint', 'emu.extract',
-    'emu.snapshot', 'emu.checkpointver', 'emu.sparse', 'emu.esdhc', 'emu.run',
-    'emu.config',
+    'emu.snapshot', 'emu.checkpointver', 'emu.sparse', 'emu.samples', 'emu.esdhc',
+    'emu.run', 'emu.config',
     'emu.device', 'emu.longrun', 'emu.panel', 'emu.screen', 'emu.symbols', 'emu.dtim',
     'emu.pit', 'emu.harness', 'emu.native', 'emu.fastuc', 'emu.unicorn_compat',
     'emu.dspboot', 'emu.dsp', 'emu.edma', 'emu.gpio', 'emu.hle',

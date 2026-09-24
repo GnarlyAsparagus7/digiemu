@@ -1058,7 +1058,8 @@ class PanelTest(Base):
         rc, err, panel = self.run_panel(paths, lambda p: (p.gui, 'gui'))
         self.assertEqual(rc, 0, err)
         self.assertEqual(panel.calls, [[paths.gui, '--syx', paths.syx,
-                                        '--save-on-exit', paths.resume]])
+                                        '--save-on-exit', paths.resume,
+                                        '--app']])
         state = _read_state(paths)
         self.assertEqual(state['resume'], _card_stamp(paths.card))
         self.assertEqual(state['card'], {'size': 1, 'mtime_ns': 2})
@@ -1153,6 +1154,27 @@ class PanelTest(Base):
         rc, _, _ = self.run_panel(paths, lambda p: (p.resume, 'resume'), panel)
         self.assertEqual(rc, 1)
         self.assertNotIn('resume', _read_state(paths))
+
+    def test_loaded_samples_are_exit_8_and_drop_the_resume(self):
+        """dtpanel 6: the session was saved, then LOAD SAMPLES wrote the
+        card. That resume.snap predates the samples; only a rebuild shows
+        them."""
+        paths = self.resumable()
+        panel = make_panel(rc=6)
+        real = panel.main
+
+        def loads_samples(argv):
+            rc = real(argv)
+            with open(paths.card, 'ab') as fh:
+                fh.write(b'\x5a')
+            return rc
+
+        panel.main = loads_samples
+        rc, _, _ = self.run_panel(paths, lambda p: (p.resume, 'resume'), panel)
+        self.assertEqual(rc, portable.EXIT_SAMPLES_ADDED)
+        self.assertNotIn('resume', _read_state(paths))
+        with open(os.path.join(paths.logs, 'panel.log'), encoding='utf-8') as fh:
+            self.assertIn('samples were loaded', fh.read())
 
     def test_an_incompatible_snapshot_is_exit_7_and_asks_for_a_rebuild(self):
         paths = self.resumable()
@@ -1991,6 +2013,26 @@ class LauncherTest(Base):
         app._poll()
         self.assertIn('different build', self.dialogs.texts['Rebuild needed'])
         self.assertEqual(self.spawned[-1], ('first-run', paths.root, ('--rebuild',), True))
+
+    def test_loaded_samples_rebuild_then_reopen_without_asking(self):
+        paths = self.make_folder()
+        self.choice = (paths.gui, 'gui')
+        app, _ = self.launch()
+        app.play()
+        self.assertEqual(self.spawned[-1][0], 'panel')
+        self.next_proc = FakeProc([portable.encode_line(
+            portable.result_record(True))], rc=0)
+        app.events.put(('exit', paths.root, portable.EXIT_SAMPLES_ADDED))
+        app._poll()
+        self.assertEqual(self.spawned[-1],
+                         ('first-run', paths.root, ('--rebuild',), True))
+        self.assertTrue(app.jobs[paths.root].open_after)
+        app._read_worker(paths.root, self.next_proc)
+        app._poll()
+        self.assertEqual(self.spawned[-1], ('panel', paths.root, (), False))
+        self.assertNotIn(('askyesno', 'Ready'), self.dialogs.calls)
+        self.assertEqual([c for c in self.dialogs.calls
+                          if c[0] == 'askyesno'], [])
 
     # reset to factory
 

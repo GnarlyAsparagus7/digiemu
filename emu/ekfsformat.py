@@ -105,6 +105,7 @@ DIRECTORY INDEXES -- what this tool used to get wrong
   parent and each child directory's '..' -- root 3, an empty /incoming 2 --
   and adding a file leaves it alone. This tool used to bump it once per file.
 """
+import collections
 import os
 import struct
 
@@ -340,13 +341,15 @@ SAMPLE_HASH_SEED = 0x654C654B
 HASH_TABLE_BLOCK = 64
 
 
-def wav_to_sample(data):
-    """RIFF/WAVE bytes -> (sample file bytes, sample rate, frames).
+WavInfo = collections.namedtuple('WavInfo', 'tag channels rate bits frames pcm')
 
-    Integer PCM of 8/16/24/32 bits and 32-bit float, any channel count
-    (averaged to mono -- the mk1 plays mono), WAVE_FORMAT_EXTENSIBLE
-    included. The rate is kept rather than resampled: the header has a field
-    for it and the engine computes the pitch ratio from it.
+
+def wav_info(data):
+    """RIFF/WAVE bytes -> WavInfo, with every check wav_to_sample makes.
+
+    Error for anything wav_to_sample would refuse, without converting: a
+    caller can vet a batch of files before committing to any of them.
+    `pcm` is the data chunk as it is in the file.
     """
     if len(data) < 12 or data[:4] != b'RIFF' or data[8:12] != b'WAVE':
         raise Error('not a RIFF/WAVE file')
@@ -362,6 +365,8 @@ def wav_to_sample(data):
         o += 8 + size + (size & 1)
     if fmt is None or pcm is None:
         raise Error('WAV has no fmt or data chunk')
+    if len(fmt) < 16:
+        raise Error('WAV fmt chunk is %d bytes, not 16' % len(fmt))
     tag, chans, rate = struct.unpack_from('<HHI', fmt, 0)
     bits = struct.unpack_from('<H', fmt, 14)[0]
     if tag == 0xFFFE and len(fmt) >= 26:
@@ -369,12 +374,27 @@ def wav_to_sample(data):
     if tag not in (1, 3) or chans < 1:
         raise Error('unsupported WAV format tag %d, %d channel(s)'
                     % (tag, chans))
-    width = bits // 8
     if tag == 3 and bits != 32 or tag == 1 and bits not in (8, 16, 24, 32):
         raise Error('unsupported %d-bit %s WAV'
                     % (bits, 'float' if tag == 3 else 'integer'))
+    frames = len(pcm) // (bits // 8 * chans)
+    if frames * 2 > MAX_SAMPLE_PCM:
+        raise Error('%d bytes of PCM; the loader takes at most %d'
+                    % (frames * 2, MAX_SAMPLE_PCM))
+    return WavInfo(tag, chans, rate, bits, frames, pcm)
+
+
+def wav_to_sample(data):
+    """RIFF/WAVE bytes -> (sample file bytes, sample rate, frames).
+
+    Integer PCM of 8/16/24/32 bits and 32-bit float, any channel count
+    (averaged to mono -- the mk1 plays mono), WAVE_FORMAT_EXTENSIBLE
+    included. The rate is kept rather than resampled: the header has a field
+    for it and the engine computes the pitch ratio from it.
+    """
+    tag, chans, rate, bits, frames, pcm = wav_info(data)
+    width = bits // 8
     frame = width * chans
-    frames = len(pcm) // frame
     out = bytearray(frames * 2)
     for i in range(frames):
         acc = 0.0
@@ -395,9 +415,6 @@ def wav_to_sample(data):
             acc += v
         s = int(round(acc / chans * 32767.0))
         struct.pack_into('>h', out, 2 * i, max(-32768, min(32767, s)))
-    if len(out) > MAX_SAMPLE_PCM:
-        raise Error('%d bytes of PCM; the loader takes at most %d'
-                    % (len(out), MAX_SAMPLE_PCM))
     head = bytearray(SAMPLE_HEADER)
     struct.pack_into('>III', head, 0x04, len(out), rate, 0)
     struct.pack_into('>I', head, 0x10, 0)
@@ -423,6 +440,7 @@ class Ekfs(object):
         self.f = open(path, 'r+b' if write else 'rb')
         sb = self.sectors(base, 1)
         if sb[:4] != b'ekFS':
+            self.f.close()
             raise Error('%s: no ekFS superblock at sector 0x%x' % (path, base))
         self.sb = bytearray(sb)
         u = self._u
