@@ -52,6 +52,7 @@ SEED = {
     ('Digitone', '1.43'): dict(slot_cache=0x43229D43, selectors=0x419CE71C,
                                palette=0x40241A4C, leds=72, groups=18),
 }
+SEED[('Digitakt', '1.5d')] = SEED['1.53']
 PALETTE = 41
 
 

@@ -106,8 +106,10 @@ class Seed(unittest.TestCase):
 
     def test_the_digitakt_names_itself_or_not(self):
         self.assertIsNotNone(panelleds.seed(self.ram(), '1.53', 'Digitakt'))
+        self.assertIsNotNone(panelleds.seed(self.ram(), '1.5d', 'Digitakt'))
         # Another product never borrows the Digitakt's bare-version table.
         self.assertIsNone(panelleds.seed(self.ram(), '1.53', 'Digitone'))
+        self.assertIsNone(panelleds.seed(self.ram(), '1.5d', 'Digitone'))
 
 
 class DigitoneSeed(unittest.TestCase):
