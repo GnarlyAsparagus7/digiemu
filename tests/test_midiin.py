@@ -56,6 +56,28 @@ class MidiInTest(unittest.TestCase):
         self.bridge._dispatch(msg_off)
         self.assertEqual(self.panel.calls, [('release', '1')])
 
+    def test_shared_trig_releases_after_last_note(self):
+        note_a = SimpleNamespace(type='note_on', note=36, velocity=100)
+        note_b = SimpleNamespace(type='note_on', note=61, velocity=100)
+        off_a = SimpleNamespace(type='note_off', note=36, velocity=0)
+        off_b = SimpleNamespace(type='note_off', note=61, velocity=0)
+
+        self.bridge._dispatch(note_a)
+        self.bridge._dispatch(note_b)
+        self.assertEqual(self.panel.calls, [('press', '1')])
+        self.bridge._dispatch(off_a)
+        self.assertEqual(self.panel.calls, [('press', '1')])
+        self.bridge._dispatch(off_b)
+        self.assertEqual(self.panel.calls, [('press', '1'), ('release', '1')])
+
+    def test_stop_releases_active_notes(self):
+        self.bridge._dispatch(SimpleNamespace(
+            type='note_on', note=36, velocity=100))
+        self.bridge.stop()
+        self.assertEqual(self.panel.calls, [('press', '1'), ('release', '1')])
+        self.assertEqual(self.bridge._active_notes, {})
+        self.assertEqual(self.bridge._note_sources, {})
+
     def test_note_on_and_off_chromatic(self):
         # Note 61 (C#) -> Trig 1 (black key C#)
         msg_on = SimpleNamespace(type='note_on', note=61, velocity=100, channel=0)

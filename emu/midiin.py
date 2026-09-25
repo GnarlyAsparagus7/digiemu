@@ -173,6 +173,7 @@ class MidiBridge:
         self._stop_event = threading.Event()
         self._last_cc = {}
         self._active_notes = {}
+        self._note_sources = {}
 
     def start(self):
         """Start the MIDI listener thread."""
@@ -195,6 +196,13 @@ class MidiBridge:
             thread.join(timeout=0.5)
         if thread is self._thread and (thread is None or not thread.is_alive()):
             self._thread = None
+        for code in list(self._note_sources):
+            try:
+                self.panel.after(0, lambda c=code: self.panel.release(c))
+            except Exception:
+                pass
+        self._active_notes.clear()
+        self._note_sources.clear()
 
     def _resolve_note(self, msg):
         """Map a Note On/Off message to a panel button code."""
@@ -258,17 +266,28 @@ class MidiBridge:
             code = self._resolve_note(msg)
             print(f"[midi] -> NoteOn note={msg.note} trig={code}", flush=True)
             if code and code in self.panel.BUTTONS:
+                if msg.note in self._active_notes:
+                    return
                 self._active_notes[msg.note] = code
-                try:
-                    self.panel.after(0, lambda c=code: self.panel.press(c))
-                except Exception:
-                    pass
+                sources = self._note_sources.setdefault(code, set())
+                if not sources:
+                    try:
+                        self.panel.after(0, lambda c=code: self.panel.press(c))
+                    except Exception:
+                        pass
+                sources.add(msg.note)
             return
 
         # Note Off
         if mtype == 'note_off' or (mtype == 'note_on' and msg.velocity == 0):
             code = self._active_notes.pop(msg.note, None) or self._resolve_note(msg)
             if code and code in self.panel.BUTTONS:
+                sources = self._note_sources.get(code)
+                if sources is not None:
+                    sources.discard(msg.note)
+                    if sources:
+                        return
+                    self._note_sources.pop(code, None)
                 try:
                     self.panel.after(0, lambda c=code: self.panel.release(c))
                 except Exception:

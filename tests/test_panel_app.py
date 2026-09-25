@@ -1486,6 +1486,14 @@ class KeyboardMappingTest(unittest.TestCase):
 
 
 class FrameSnapshotTest(unittest.TestCase):
+    def test_capture_history_is_bounded(self):
+        from emu import gui
+
+        emu = gui.Emulator('missing.snap', audio=False)
+        for value in range(gui.Emulator.CAPTURE_LIMIT + 1):
+            emu.captured.append(bytes([value % 256]))
+        self.assertEqual(len(emu.captured), gui.Emulator.CAPTURE_LIMIT)
+
     def test_frame_snapshot_is_immutable(self):
         from emu import gui
 
@@ -1569,6 +1577,77 @@ class FrameSnapshotTest(unittest.TestCase):
         self.assertEqual(emu.frame_snapshot(), bytes(expected))
         self.assertEqual(emu.captured, [bytes(expected)])
         self.assertEqual(emu.version, 1)
+
+
+class InputReleaseTest(unittest.TestCase):
+    def test_panel_release_all_clears_local_state(self):
+        from emu import dtpanel
+
+        panel = object.__new__(dtpanel.DigitaktPanel)
+        panel.held = {4, 24}
+        panel.latched = {4}
+        panel._pointer_code = 24
+        panel.emu = types.SimpleNamespace(inbox=deque())
+        panel._paint = lambda _code: None
+
+        panel.release_all()
+
+        self.assertEqual(panel.held, set())
+        self.assertEqual(panel.latched, set())
+        self.assertIsNone(panel._pointer_code)
+        self.assertEqual(list(panel.emu.inbox), [('release_all', 0, 0)])
+
+    def test_worker_acknowledges_release_all(self):
+        from emu import gui
+
+        class Held:
+            def __init__(self):
+                self.called = False
+
+            def release_all(self):
+                self.called = True
+                return []
+
+        emu = object.__new__(gui.Emulator)
+        emu.held = Held()
+        emu._dwell_ms = 0
+        emu._delivered_before = False
+        emu._chunks_since_delivery = 0
+        emu.inbox = deque([('release_all', 0, 0)])
+        emu._input_release = threading.Event()
+        emu.stats = {'instrs': 0}
+
+        self.assertEqual(gui.Emulator._drain_input(emu, None, None, 0x40),
+                         0x40)
+        self.assertTrue(emu.held.called)
+        self.assertTrue(emu._input_release.is_set())
+
+
+class InputQueueTest(unittest.TestCase):
+    def test_encoder_flood_drops_oldest_encoder_first(self):
+        from emu import gui
+
+        queue = gui.InputQueue(limit=3)
+        for code in range(3):
+            queue.append(('encoder', code, 1))
+        queue.append(('encoder', 3, 1))
+
+        self.assertEqual(len(queue), 3)
+        self.assertEqual(queue.dropped, 1)
+        self.assertEqual(list(queue), [('encoder', 1, 1),
+                                       ('encoder', 2, 1),
+                                       ('encoder', 3, 1)])
+
+    def test_button_flood_collapses_to_release_all(self):
+        from emu import gui
+
+        queue = gui.InputQueue(limit=2)
+        queue.append(('press', 1, 0))
+        queue.append(('press', 2, 0))
+        queue.append(('press', 3, 0))
+
+        self.assertEqual(list(queue), [('release_all', 0, 0),
+                                       ('press', 3, 0)])
 
 
 class GlobEscapeTest(unittest.TestCase):

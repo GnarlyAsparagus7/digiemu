@@ -248,6 +248,7 @@ class DigitaktPanel(tk.Tk):
         self._audio_note = ('', 0.0)     # (message, shown until)
         self.held = set()        # codes currently asserted
         self.latched = set()     # subset of held that survives mouse-up
+        self._pointer_code = None
         self.codes = {}          # firmware label -> button code
         self.enc_codes = {}      # firmware label -> encoder code
         self.items = {}          # code -> (rect, text)
@@ -268,6 +269,8 @@ class DigitaktPanel(tk.Tk):
         self.bind('<Escape>', lambda _e: self.clear_latched())
         self.bind('<KeyPress>', self._keyboard_press)
         self.bind('<KeyRelease>', self._keyboard_release)
+        self.bind('<FocusOut>', lambda _e: self.release_all())
+        self.canvas.bind('<ButtonRelease-1>', self._pointer_release)
 
         # Closing the window has to stop the worker BEFORE the interpreter
         # tears down. The worker sits inside uc_emu_start; if the main thread
@@ -541,9 +544,9 @@ class DigitaktPanel(tk.Tk):
     # --------------------------------------------------------------- widgets
     def _bind_button(self, item, code):
         self.canvas.tag_bind(item, '<ButtonPress-1>',
-                             lambda e, k=code: self.press(k, e))
+                             lambda e, k=code: self._pointer_press(k, e))
         self.canvas.tag_bind(item, '<ButtonRelease-1>',
-                             lambda _e, k=code: self.release(k))
+                             lambda _e, k=code: self._pointer_release())
 
     def _build_controls(self):
         """Draw every control, once the firmware's own names are known."""
@@ -632,6 +635,30 @@ class DigitaktPanel(tk.Tk):
                            lambda e, k=code: self._drag(k, e))
 
     # ----------------------------------------------------------------- input
+    def _pointer_press(self, code, event=None):
+        if self._pointer_code is not None:
+            self._pointer_release()
+        self._pointer_code = code
+        self.press(code, event)
+
+    def _pointer_release(self, _event=None):
+        code = self._pointer_code
+        self._pointer_code = None
+        if code is not None:
+            self.release(code)
+
+    def release_all(self):
+        if not self.held and not self.latched:
+            self._pointer_code = None
+            self.emu.inbox.append(('release_all', 0, 0))
+            return
+        self.latched.clear()
+        for code in list(self.held):
+            self.held.discard(code)
+            self._paint(code)
+        self._pointer_code = None
+        self.emu.inbox.append(('release_all', 0, 0))
+
     def press(self, code, event=None):
         if isinstance(code, str):
             code = self.codes.get(code)
@@ -913,8 +940,19 @@ class DigitaktPanel(tk.Tk):
         emu = getattr(self, 'emu', None)
         if emu is None or not emu.is_alive():
             return True
-        emu.stop_flag.set()
+        release_ack = getattr(emu, '_input_release', None)
+        if release_ack is not None:
+            release_ack.clear()
+        release = getattr(self, 'release_all', None)
+        if release is not None:
+            release()
         emu.pause.clear()
+        if release_ack is not None:
+            deadline = time.monotonic() + self.STOP_TIMEOUT
+            while not release_ack.wait(0.05):
+                if not emu.is_alive() or time.monotonic() >= deadline:
+                    break
+        emu.stop_flag.set()
         if why:
             self._say(why, AMBER)
         return self._wait_for_worker(emu)

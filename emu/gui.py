@@ -99,6 +99,44 @@ FRAME_HZ = 132_000_000 / ((0x2191 + 1) * 1024)     # 14.9996
 # first thing to read it semantically.
 LATCHING_GROUPS = frozenset({'modifiers'})
 
+
+class InputQueue:
+    def __init__(self, limit=256):
+        self._items = collections.deque()
+        self.limit = limit
+        self.dropped = 0
+
+    def __bool__(self):
+        return bool(self._items)
+
+    def __len__(self):
+        return len(self._items)
+
+    def __iter__(self):
+        return iter(self._items)
+
+    def popleft(self):
+        return self._items.popleft()
+
+    def appendleft(self, item):
+        self._items.appendleft(item)
+
+    def append(self, item):
+        if len(self._items) >= self.limit:
+            for index, queued in enumerate(self._items):
+                if queued[0] == 'encoder':
+                    del self._items[index]
+                    self.dropped += 1
+                    break
+            else:
+                self._items.clear()
+                self.dropped += 1
+                self._items.append(('release_all', 0, 0))
+                if item[0] == 'release_all':
+                    return
+        self._items.append(item)
+
+
 W, H = 128, 64
 
 # Vertical space the window owes to everything that is not the panel: the
@@ -310,6 +348,7 @@ class Emulator(threading.Thread):
     """
 
     daemon = True
+    CAPTURE_LIMIT = 256
 
     def __init__(self, snapshot, weakptr=False, slc=False, syx=None,
                  fast=True, realtime=True, patch_machine=False,
@@ -382,7 +421,7 @@ class Emulator(threading.Thread):
         self.realtime = realtime
         self._paced = 0
         self._pace_t0 = None
-        self._rate_t = None         # wall-clock instruction rate window
+        self._rate_t = None         # monotonic instruction rate window
         self._rate_instrs = 0
         self.fb = bytearray(W * H)
         self._fb_lock = threading.Lock()
@@ -400,8 +439,8 @@ class Emulator(threading.Thread):
         self.incompatible = False   # error is a snapshot from another build
         self._seen = set()
         self.version = 0            # bumped on every pixel, so the UI can
-        self._frame_t = time.time()  # skip redrawing an unchanged panel
-        self.captured = []          # completed frames, for correct-speed replay
+        self._frame_t = time.monotonic()  # skip redrawing an unchanged panel
+        self.captured = collections.deque(maxlen=self.CAPTURE_LIMIT)
         self.use_panel = False      # False: setPixel (intro). True: the
                                     # firmware's own framebuffer (main OS).
         self._last_panel = None     # last panel buffer drawn, to skip repeats
@@ -413,7 +452,8 @@ class Emulator(threading.Thread):
         # worker sits inside emu_start for a whole BUDGET at a time. So
         # clicks arrive on this queue and are applied between chunks, the
         # same safe point pause already uses.
-        self.inbox = collections.deque()
+        self.inbox = InputQueue()
+        self._input_release = threading.Event()
         self.device = None          # which product, identified by firmware hash
         self.firmware = None        # its [[firmware]] entry (version etc.)
         # Key LEDs, decoded from the UART8 stream to the panel MCU (see
@@ -508,6 +548,11 @@ class Emulator(threading.Thread):
                     step = arg * getattr(self.device, 'encoder_counts', 1)
                     out += panelin.encode_encoder(
                         channel, max(-127, min(127, step)))
+            elif kind == 'release_all':
+                took_button = True
+                for pos in self.held.release_all():
+                    out += panelin.encode_buttons(*pos)
+                self._input_release.set()
             elif not button_ok or (paced and took_button):
                 deferred.append((kind, code, arg))
             else:
@@ -581,7 +626,7 @@ class Emulator(threading.Thread):
             return
         self.stats['bmp'] = bmp
         if (x, y) in self._seen and len(self._seen) > W * H // 2:
-            now = time.time()
+            now = time.monotonic()
             self.captured.append(self.frame_snapshot())
             self.stats['frames'] += 1              # coordinate repeat = new frame
             self.stats['fps'] = 1.0 / max(1e-6, now - self._frame_t)
@@ -984,11 +1029,12 @@ class Emulator(threading.Thread):
                                          self.audio_cfg['rate']), flush=True)
         self.ready.set()
         self.stats['status'] = 'running'
-        self._pace_t0 = time.time()
+        self._pace_t0 = time.monotonic()
         while not self.stop_flag.is_set():
             if self.pause.is_set():
                 self.stats['status'] = 'paused'
                 self._rate_t = None
+                self._pace_t0 = time.monotonic()
                 time.sleep(0.05)
                 continue
             # Work out the status BEFORE blocking, not after: spin sits
@@ -1000,7 +1046,7 @@ class Emulator(threading.Thread):
             # fps is measured between completed frames, so it holds its last
             # value forever once the firmware stops drawing. Decay it, or the
             # panel sits frozen while the status line claims 15 fps.
-            idle = time.time() - self._frame_t
+            idle = time.monotonic() - self._frame_t
             if idle > 1.0:
                 self.stats['fps'] = 0.0
                 self.stats['status'] = 'running, no frame for %.0fs' % idle
@@ -1042,7 +1088,7 @@ class Emulator(threading.Thread):
                               % (stop, pc, total // 1_000_000))
                 break
             self.stats['instrs'] += executed
-            now = time.time()
+            now = time.monotonic()
             if self._rate_t is None:
                 self._rate_t, self._rate_instrs = now, self.stats['instrs']
             elif now - self._rate_t >= 1.0:
@@ -1059,7 +1105,7 @@ class Emulator(threading.Thread):
                 # old rate. Capped per sleep so pause and stop stay
                 # responsive.
                 self._paced += executed / pits.sources[0].ips
-                ahead = self._paced - (time.time() - self._pace_t0)
+                ahead = self._paced - (time.monotonic() - self._pace_t0)
                 if ahead > 0.003:
                     naptime = min(ahead, 0.05)
                     self._slept += naptime
@@ -1259,7 +1305,7 @@ class Emulator(threading.Thread):
             self.audio_frames += n // 8
             if self.audio_live and not self.audio_muted:
                 self._live_write(pcm)
-        now = time.time()
+        now = time.monotonic()
         if self._audio_t is None:
             self._audio_t, self._audio_mark = now, self.audio_frames
         elif now - self._audio_t >= 1.0:
@@ -1383,7 +1429,7 @@ class Emulator(threading.Thread):
         with self._fb_lock:
             self.fb[:] = frame
             self.version += 1
-        now = time.time()
+        now = time.monotonic()
         self.captured.append(bytes(frame))
         self.stats['frames'] += 1
         self.stats['fps'] = 1.0 / max(1e-6, now - self._frame_t)
@@ -1829,7 +1875,7 @@ class App(tk.Tk):
         if self.emu:
             self.emu.pause.set()
             self.btn.configure(text='Resume')
-        self.replay = [frames, 0, time.time()]
+        self.replay = [frames, 0, time.monotonic()]
         self.replay_btn.configure(text='Stop replay')
 
     def toggle(self):
@@ -1859,7 +1905,7 @@ class App(tk.Tk):
     def tick(self):
         if self.replay is not None:
             frames, i, due = self.replay
-            now = time.time()
+            now = time.monotonic()
             if now >= due:
                 self.panel.draw(frames[i])
                 i = (i + 1) % len(frames)
