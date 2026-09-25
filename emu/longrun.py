@@ -271,9 +271,12 @@ def build(snapshot, send=b'', syx=None, isa='scoped',
     if tuple(modeled_vectors) != (208,):
         checkpoint_manifest['modeled_vectors'] = tuple(sorted(modeled_vectors))
     m = Machine(); st = {'seen': set(), 'n': 0, 'task_create_hits': {}}
-    ev = {'tasks': [], 'prints': [], 'setpixel': 0, 'pxcopy': 0,
-          'switch': collections.Counter(), 'switch_seq': [],
-          'uart_out': bytearray(), 'satisfied': 0, 'satisfied_by': collections.Counter(),
+    ev = {'tasks': [], 'prints': collections.deque(maxlen=4096),
+          'setpixel': 0, 'pxcopy': 0,
+          'switch': collections.Counter(),
+          'switch_seq': collections.deque(maxlen=4096),
+          'uart_out': collections.deque(maxlen=65536),
+          'satisfied': 0, 'satisfied_by': collections.Counter(),
           'satisfied_by_sem': collections.Counter(),
           'depack_clamps': 0}
     inq = collections.deque(send)

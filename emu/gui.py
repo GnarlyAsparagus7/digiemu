@@ -380,6 +380,7 @@ class Emulator(threading.Thread):
         self._audio_sources = ()
         self._audio_t = None
         self._audio_mark = 0
+        self._dsp = None
         # Live output (accelerated Unicorn only): see _live_write.
         self.audio_live = False
         self.audio_muted = False
@@ -604,6 +605,11 @@ class Emulator(threading.Thread):
                                     else 'failed to load')
             print('[gui] EMULATOR STOPPED: %s' % self.error, flush=True)
             traceback.print_exc(file=sys.stdout)
+            if self._dsp is not None:
+                try:
+                    self._dsp.close()
+                except Exception:                       # noqa: BLE001
+                    pass
             self._close_live()
         finally:
             self.ready.set()
@@ -795,6 +801,7 @@ class Emulator(threading.Thread):
                 # renders run on their own thread, in parallel with the main
                 # CPU, as the two chips do.
                 dsp = ev.get('dspcpu')
+                self._dsp = dsp
                 if dsp is not None and self.audio_live:
                     dsp.start_thread()
             else:
@@ -1266,7 +1273,7 @@ class Emulator(threading.Thread):
             return
         if buf:
             data = bytes(buf)
-            del buf[:]
+            buf.clear()
             st.feed(data)
         elif st is getattr(self, '_leds_from', None):
             # Nothing new since the colours were last read: they only
@@ -1842,14 +1849,34 @@ class App(tk.Tk):
                                  self.emu.encoder_names, self.send_input)
         self.controls.pack(padx=14, pady=(0, 10))
 
+    def _stop_emu(self):
+        emu = self.emu
+        if emu is None:
+            return True
+        release_ack = getattr(emu, '_input_release', None)
+        if release_ack is not None:
+            release_ack.clear()
+            emu.inbox.append(('release_all', 0, 0))
+        emu.pause.clear()
+        if release_ack is not None:
+            deadline = time.monotonic() + 3.0
+            while not release_ack.wait(0.05):
+                if not emu.is_alive() or time.monotonic() >= deadline:
+                    break
+        emu.stop_flag.set()
+        emu.join(timeout=3)
+        if emu.is_alive():
+            self.status.configure(
+                text='emulator is still stopping; try again', fg='#ff8f8f')
+            return False
+        return True
+
     def restart(self):
+        if not self._stop_emu():
+            return
         if self.controls is not None:
             self.controls.destroy()
             self.controls = None
-        if self.emu:
-            self.emu.stop_flag.set()
-            self.emu.pause.clear()
-            self.emu.join(timeout=3)
         self.panel._blank()
         self.shown = -1
         self.replay = None
@@ -1903,6 +1930,15 @@ class App(tk.Tk):
         self.status.configure(text='wrote out/panel.png')
 
     def tick(self):
+        try:
+            self._tick()
+        except Exception as exc:                       # noqa: BLE001
+            self.status.configure(text='tick error: %s' % exc,
+                                  fg='#ff8f8f')
+        finally:
+            self.after(10 if self.replay is not None else 60, self.tick)
+
+    def _tick(self):
         if self.replay is not None:
             frames, i, due = self.replay
             now = time.monotonic()
@@ -1917,7 +1953,6 @@ class App(tk.Tk):
                     text='replaying captured frames at the firmware\'s own rate\n'
                          'PIT3: (0x2191+1) x 1024 = 8,800,256 bus cycles @ 132 MHz',
                     fg='#9aa7b8')
-            self.after(10, self.tick)
             return
         e = self.emu
         if e:
@@ -1951,16 +1986,10 @@ class App(tk.Tk):
                             s['dtim3'], s['mainloop'], s['jobs'],
                             s['instrs'] / 1e6),
                     fg='#9aa7b8')
-        self.after(60, self.tick)
 
     def quit_all(self):
-        # Join before tearing down: the worker is inside Unicorn between
-        # chunks, and letting the interpreter kill a daemon thread mid-
-        # emu_start crashes the process on exit (SIGBUS).
-        if self.emu:
-            self.emu.stop_flag.set()
-            self.emu.pause.clear()
-            self.emu.join(timeout=3)
+        if not self._stop_emu():
+            return
         self.destroy()
 
 
