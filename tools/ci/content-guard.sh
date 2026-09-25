@@ -15,7 +15,7 @@ if [[ -n $bad ]]; then
 fi
 
 while IFS= read -r -d '' f; do
-  size=$(stat -c %s "$f")
+  size=$(wc -c < "$f")
   if ((size > 1048576)); then
     echo "error: $f is $size bytes (limit 1 MB)"
     status=1

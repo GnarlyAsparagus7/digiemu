@@ -145,6 +145,8 @@ class Device:
         A code with no wire position is not an error: Digitakt simply has
         fewer channel-6 controls than Digitone.
         """
+        if not isinstance(code, int):
+            return None
         if code in self.exceptions:
             return self.exceptions[code]
         if 1 <= code <= self.linear_channels * 8:
@@ -166,6 +168,8 @@ class Device:
         Rotation codes are a separate space from the encoder push buttons:
         rotation `code` is wire channel `code - 1`.
         """
+        if not isinstance(code, int):
+            return None
         if 1 <= code <= self.encoders:
             return code - 1
         return None

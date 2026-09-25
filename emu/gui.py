@@ -385,6 +385,7 @@ class Emulator(threading.Thread):
         self._rate_t = None         # wall-clock instruction rate window
         self._rate_instrs = 0
         self.fb = bytearray(W * H)
+        self._fb_lock = threading.Lock()
         self.pause = threading.Event()
         self.stop_flag = threading.Event()
         self.ready = threading.Event()
@@ -580,7 +581,7 @@ class Emulator(threading.Thread):
             self.stats['bmp'] = bmp
             if (x, y) in self._seen and len(self._seen) > W * H // 2:
                 now = time.time()
-                self.captured.append(bytes(self.fb))    # snapshot the finished frame
+                self.captured.append(self.frame_snapshot())
                 self.stats['frames'] += 1              # coordinate repeat = new frame
                 self.stats['fps'] = 1.0 / max(1e-6, now - self._frame_t)
                 self._frame_t = now
@@ -594,9 +595,10 @@ class Emulator(threading.Thread):
                 # instructions instead, which is soon enough for pause and
                 # stop to feel immediate.
             self._seen.add((x, y))
-            self.fb[y * W + x] = val
+            with self._fb_lock:
+                self.fb[y * W + x] = val
+                self.version += 1
             self.stats['px'] += 1
-            self.version += 1
 
         try:
             # NOTE: unblock=True also satisfies the frame semaphore, so the
@@ -1304,6 +1306,10 @@ class Emulator(threading.Thread):
         if self._live_out is not None:
             self._live_out.gain = self._volume
 
+    def frame_snapshot(self):
+        with self._fb_lock:
+            return bytes(self.fb)
+
     def live_latency_ms(self):
         out = self._live_out
         return 0 if out is None else out.queued() * 10
@@ -1365,19 +1371,19 @@ class Emulator(threading.Thread):
             return
         self._panel_live = True
         self._last_panel = buf
-        fb = self.fb
-        for i in range(W * H):
-            fb[i] = 0
+        frame = bytearray(W * H)
         for x, y in px:
-            fb[y * W + x] = 1
+            frame[y * W + x] = 1
+        with self._fb_lock:
+            self.fb[:] = frame
+            self.version += 1
         now = time.time()
-        self.captured.append(bytes(fb))
+        self.captured.append(bytes(frame))
         self.stats['frames'] += 1
         self.stats['fps'] = 1.0 / max(1e-6, now - self._frame_t)
         self.stats['panel_lit'] = len(px)
         self.stats['source'] = 'panel'
         self._frame_t = now
-        self.version += 1
 
     def _stack_backtrace(self, m, depth=64):
         """Scan upward from A7 for values that look like main OS code addresses.
@@ -1834,7 +1840,7 @@ class App(tk.Tk):
         os.makedirs('out', exist_ok=True)
         s = 6
         px = bytearray(W * s * H * s)
-        for i, v in enumerate(self.emu.fb):
+        for i, v in enumerate(self.emu.frame_snapshot()):
             if v:
                 x, y = i % W, i // W
                 for dy in range(s):
@@ -1868,7 +1874,7 @@ class App(tk.Tk):
             else:
                 self._ensure_controls()
                 if e.version != self.shown:
-                    self.panel.draw(e.fb)      # skip if nothing was drawn
+                    self.panel.draw(e.frame_snapshot())
                     self.shown = e.version
                 s = e.stats
                 self.frames_lbl.configure(

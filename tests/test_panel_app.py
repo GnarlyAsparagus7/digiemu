@@ -1427,6 +1427,105 @@ class MasterVolumeTest(unittest.TestCase):
             self.assertEqual(win.player.gain, win._mv_value)      # PLAY's replay
 
 
+class KeyboardMappingTest(unittest.TestCase):
+    def panel(self, product='Digitakt', playing=False):
+        from emu import dtpanel
+
+        panel = object.__new__(dtpanel.DigitaktPanel)
+        panel.PRODUCT = product
+        panel._keyboard_held = set()
+        panel.codes = {'BANK': 4, '1': 24, 'PLAY': 10, 'STOP': 11,
+                       'UP': 14, 'DOWN': 15, 'LEFT': 16, 'RIGHT': 17}
+        panel.led_of = {10: 37}
+        panel._leds = {37: (255, 0, 0)} if playing else {}
+        calls = []
+        panel.press = lambda code, event=None: calls.append(('press', code))
+        panel.release = lambda code: calls.append(('release', code))
+        panel.after = lambda _delay, callback: callback()
+        return panel, calls
+
+    def test_number_keys_toggle_digitakt_track_mute(self):
+        panel, calls = self.panel()
+        event = types.SimpleNamespace(keysym='1')
+
+        self.assertEqual(panel._keyboard_press(event), 'break')
+        self.assertEqual(calls, [
+            ('press', 'TRK'), ('press', '1'),
+            ('release', '1'), ('release', 'TRK'),
+        ])
+        panel._keyboard_press(event)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(panel._keyboard_release(event), 'break')
+
+    def test_number_keys_do_not_map_digitone_trigs(self):
+        panel, calls = self.panel(product='Digitone')
+        self.assertIsNone(panel._keyboard_press(
+            types.SimpleNamespace(keysym='1')))
+        self.assertEqual(calls, [])
+
+    def test_space_toggles_transport_from_play_led(self):
+        panel, calls = self.panel(playing=True)
+        self.assertEqual(panel._keyboard_press(
+            types.SimpleNamespace(keysym='space')), 'break')
+        self.assertEqual(calls, [('press', 'STOP'), ('release', 'STOP')])
+
+        panel, calls = self.panel()
+        panel._keyboard_press(types.SimpleNamespace(keysym='space'))
+        self.assertEqual(calls, [('press', 'PLAY'), ('release', 'PLAY')])
+
+    def test_arrow_keys_press_until_released(self):
+        panel, calls = self.panel()
+        press = types.SimpleNamespace(keysym='Up')
+        release = types.SimpleNamespace(keysym='Up')
+
+        self.assertEqual(panel._keyboard_press(press), 'break')
+        self.assertEqual(panel._keyboard_press(press), 'break')
+        self.assertEqual(calls, [('press', 'UP')])
+        self.assertEqual(panel._keyboard_release(release), 'break')
+        self.assertEqual(calls, [('press', 'UP'), ('release', 'UP')])
+
+
+class FrameSnapshotTest(unittest.TestCase):
+    def test_frame_snapshot_is_immutable(self):
+        from emu import gui
+
+        emu = object.__new__(gui.Emulator)
+        emu.fb = bytearray(gui.W * gui.H)
+        emu._fb_lock = threading.Lock()
+        emu.fb[0] = 1
+
+        frame = emu.frame_snapshot()
+        emu.fb[0] = 0
+        self.assertIsInstance(frame, bytes)
+        self.assertEqual(frame[0], 1)
+
+    def test_panel_publishes_a_complete_frame(self):
+        from emu import gui
+
+        emu = object.__new__(gui.Emulator)
+        emu.use_panel = True
+        emu._panel_latch = b'frame'
+        emu.fb_front = None
+        emu._last_panel = None
+        emu._panel_live = False
+        emu.fb = bytearray(gui.W * gui.H)
+        emu._fb_lock = threading.Lock()
+        emu.captured = []
+        emu.stats = {'frames': 0, 'fps': 0.0, 'panel_lit': 0,
+                     'source': 'setPixel'}
+        emu._frame_t = 0.0
+        emu.version = 0
+
+        with mock.patch.object(gui.panel, 'lit', return_value={(0, 0)}):
+            gui.Emulator._publish_panel(emu, None)
+
+        expected = bytearray(gui.W * gui.H)
+        expected[0] = 1
+        self.assertEqual(emu.frame_snapshot(), bytes(expected))
+        self.assertEqual(emu.captured, [bytes(expected)])
+        self.assertEqual(emu.version, 1)
+
+
 class GlobEscapeTest(unittest.TestCase):
     """A '[' in the app's folder must not hide the sections."""
 

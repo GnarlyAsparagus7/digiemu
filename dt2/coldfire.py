@@ -20,9 +20,13 @@ from capstone import Cs, CS_ARCH_M68K, CS_MODE_BIG_ENDIAN, CS_MODE_M68K_040
 _md = Cs(CS_ARCH_M68K, CS_MODE_BIG_ENDIAN | CS_MODE_M68K_040)
 
 
+def _has_bytes(img, off, size):
+    return off >= 0 and off + size <= len(img)
+
+
 def decode_mvsz(img, off):
     """-> (mnemonic, operands, size) for ColdFire MVS/MVZ, else None."""
-    if off + 2 > len(img):
+    if not _has_bytes(img, off, 2):
         return None
     w = struct.unpack_from('>H', img, off)[0]
     if (w & 0xF100) != 0x7100:
@@ -30,13 +34,21 @@ def decode_mvsz(img, off):
     dn, ss, mmm, rrr = (w >> 9) & 7, (w >> 6) & 3, (w >> 3) & 7, w & 7
     mn = {0: 'mvs.b', 1: 'mvs.w', 2: 'mvz.b', 3: 'mvz.w'}[ss]
     if mmm == 7 and rrr == 1:
+        if not _has_bytes(img, off, 6):
+            return None
         return mn, '$%08x.l, d%d' % (struct.unpack_from('>I', img, off+2)[0], dn), 6
     if mmm == 7 and rrr == 0:
+        if not _has_bytes(img, off, 4):
+            return None
         return mn, '$%04x.w, d%d' % (struct.unpack_from('>H', img, off+2)[0], dn), 4
     if mmm == 5:
+        if not _has_bytes(img, off, 4):
+            return None
         d16 = struct.unpack_from('>h', img, off+2)[0]
         return mn, '%s$%x(a%d), d%d' % ('-' if d16 < 0 else '', abs(d16), rrr, dn), 4
     if mmm == 6:                      # (d8, An, Xn) -- indexed
+        if not _has_bytes(img, off, 4):
+            return None
         ext = struct.unpack_from('>H', img, off+2)[0]
         xn = (ext >> 12) & 0xF
         xreg = ('a%d' % (xn - 8)) if xn >= 8 else ('d%d' % xn)
@@ -51,6 +63,8 @@ def decode_mvsz(img, off):
 
 
 def decode_ff1(img, off):
+    if not _has_bytes(img, off, 2):
+        return None
     w = struct.unpack_from('>H', img, off)[0]
     if 0x04C0 <= w <= 0x04C7:
         return 'ff1.l', 'd%d' % (w & 7), 2
@@ -86,7 +100,16 @@ def disasm(img, base, start, end, annotate=None):
             if decode_mvsz(img, o) or decode_ff1(img, o):
                 break
         if not produced:
-            w = struct.unpack_from('>H', img, pc - base)[0]
+            off = pc - base
+            available = min(end - pc, len(img) - off)
+            if available <= 0:
+                break
+            if available == 1:
+                value = img[off]
+                yield pc, '%02x' % value, '.byte', '$%02x' % value
+                pc += 1
+                continue
+            w = struct.unpack_from('>H', img, off)[0]
             yield pc, '%04x' % w, '.word', '$%04x' % w
             pc += 2
 

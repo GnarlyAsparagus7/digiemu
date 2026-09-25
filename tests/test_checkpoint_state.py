@@ -78,6 +78,20 @@ class CheckpointStateTest(unittest.TestCase):
         restored.restore_checkpoint_state(original.checkpoint_state())
         self.assertEqual(restored.checkpoint_state(), original.checkpoint_state())
 
+    def test_timer_checkpoint_clock_exceeding_32bit(self):
+        pit = Pits.__new__(Pits)
+        pit.channels, pit.ips = (3,), 64_000_000
+        pit.next, pit.now, pit.held = [None, None, None, 50_000_000_100], 50_000_000_000, False
+        pit.fired, pit.missed = collections.Counter({3: 10_000_000_000}), collections.Counter()
+        pit.pending = set()
+        state = pit.checkpoint_state()
+        from emu.snapshot import _validate_timer_source
+        _validate_timer_source(state)
+        restored = Pits.__new__(Pits)
+        restored.channels, restored.ips = (3,), 64_000_000
+        restored.restore_checkpoint_state(state)
+        self.assertEqual(restored.now, 50_000_000_000)
+
     def test_timers_restores_source_order_and_rejects_mismatch(self):
         pit = Pits.__new__(Pits)
         pit.channels, pit.ips, pit.next, pit.now, pit.held = (

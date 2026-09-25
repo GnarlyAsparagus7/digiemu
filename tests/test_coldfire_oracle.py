@@ -14,6 +14,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from dt2 import coldfire
+
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures" / "coldfire"
 EXPECTED = FIXTURES / "mcf54415-oracle.json"
@@ -140,6 +142,23 @@ class GnuOracleTest(unittest.TestCase):
             )
             self.assertNotEqual(proc.returncode, 0)
             self.assertFalse(obj.exists())
+
+
+class TruncatedDecodeTest(unittest.TestCase):
+    def test_truncated_mvs_immediates_are_not_unpacked(self):
+        for size in range(2, 6):
+            with self.subTest(size=size):
+                self.assertIsNone(coldfire.decode_mvsz(
+                    (b'\x71\xf9' + b'\x00' * 4)[:size], 0))
+
+    def test_truncated_ff1_is_not_unpacked(self):
+        self.assertIsNone(coldfire.decode_ff1(b'\x04', 0))
+
+    def test_disassembly_emits_a_partial_byte_without_raising(self):
+        self.assertEqual(
+            list(coldfire.disasm(b'\x04', 0, 0, 1)),
+            [(0, '04', '.byte', '$04')],
+        )
 
 
 @unittest.skipUnless(have_pypcode(), "needs pypcode (pyproject.toml)")

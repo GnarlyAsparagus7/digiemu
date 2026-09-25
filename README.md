@@ -35,7 +35,9 @@ time, and a PC with Smart App Control turned on blocks it.
 ## Using the panel
 
 - **Keys:** click to press. **Shift-click latches** a key, for combinations
-  such as FUNC + a trig; Esc (or *clear latched*) releases them.
+  such as FUNC + a trig; Esc (or *clear latched*) releases them. Number keys
+  **1–8** toggle Digitakt track mute, **Space** toggles PLAY/STOP, and the
+  arrow keys navigate the panel.
 - **Encoders:** mouse wheel or drag. Click the letter under a knob to push it.
 - **Master Volume** (top left): mouse wheel or drag. A software gain on
   the live output and on PLAY's replay, from silent up to 1.5× (which can

@@ -27,6 +27,7 @@ FILL blocks reserve address space without supplying bytes (one of them clears
 import argparse
 import os
 import sys
+import uuid
 
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path[:] = [p for p in sys.path if os.path.abspath(p or '.') != _here]
@@ -109,15 +110,16 @@ def main(argv):
     else:
         os.makedirs(args.project, exist_ok=True)
         project = GhidraProject.createProject(args.project, args.project_name, False)
+    temp_name = '%s.importing-%s' % (name, uuid.uuid4().hex)
+    consumer = JObject()
+    program = None
+    project_data = project.getProject().getProjectData()
     try:
-        existing = project.getProject().getProjectData().getFile('/' + name)
-        if existing is not None:
-            if not args.overwrite:
-                print('program /%s already exists; pass --overwrite' % name)
-                return 1
-            existing.delete()
+        existing = project_data.getFile('/' + name)
+        if existing is not None and not args.overwrite:
+            print('program /%s already exists; pass --overwrite' % name)
+            return 1
 
-        consumer = JObject()
         program = ProgramDB(name, lang, lang.getDefaultCompilerSpec(), consumer)
         tx = program.startTransaction('import SHARC boot stream')
         try:
@@ -220,8 +222,7 @@ def main(argv):
         finally:
             program.endTransaction(tx, True)
 
-        project.saveAs(program, '/', name, True)
-        print('saved /%s' % name)
+        project.saveAs(program, '/', temp_name, True)
 
         if args.analyze:
             from ghidra.app.plugin.core.analysis import AutoAnalysisManager
@@ -236,15 +237,27 @@ def main(argv):
             project.save(program)
             print('analysis complete; %d functions' %
                   program.getFunctionManager().getFunctionCount())
-        program.release(consumer)
+
+        project.saveAs(program, '/', name, True)
+        print('saved /%s' % name)
     finally:
-        # We created the program rather than opening it through the project,
-        # so the project is not one of its consumers and close() would fail
-        # trying to release it. The save has already happened by here.
         try:
-            project.close()
-        except Exception:
-            pass
+            if program is not None:
+                program.release(consumer)
+        finally:
+            try:
+                temporary = project_data.getFile('/' + temp_name)
+                if temporary is not None and not temporary.delete():
+                    print('warning: could not remove temporary program /%s' % temp_name,
+                          file=sys.stderr)
+            except Exception as exc:
+                print('warning: could not remove temporary program /%s: %s' %
+                      (temp_name, exc), file=sys.stderr)
+            finally:
+                try:
+                    project.close()
+                except Exception:
+                    pass
     return 0
 
 

@@ -58,7 +58,7 @@ import sys
 import time
 import tkinter as tk
 
-from emu import audioout, config
+from emu import audioout, config, midiin
 from emu.gui import ON, OFF, Emulator, H, W
 
 # RGB for each framebuffer byte value: zero is off, anything else on.
@@ -258,6 +258,7 @@ class DigitaktPanel(tk.Tk):
         self.page_items = []     # (LED id, oval) for the pattern-page LEDs
         self._leds = {}          # LED id -> (r, g, b), as last drawn
         self._led_version = -1
+        self._keyboard_held = set()
 
         self.screen = tk.PhotoImage(width=W, height=H)
         self.big = tk.PhotoImage(width=W * SCALE, height=H * SCALE)
@@ -265,6 +266,8 @@ class DigitaktPanel(tk.Tk):
         self.draw_screen(bytearray(W * H))
 
         self.bind('<Escape>', lambda _e: self.clear_latched())
+        self.bind('<KeyPress>', self._keyboard_press)
+        self.bind('<KeyRelease>', self._keyboard_release)
 
         # Closing the window has to stop the worker BEFORE the interpreter
         # tears down. The worker sits inside uc_emu_start; if the main thread
@@ -276,6 +279,13 @@ class DigitaktPanel(tk.Tk):
         # rather than as a shutdown bug. emu/gui.py's quit_all has carried
         # this fix for the other GUI all along; this one never got it.
         self.protocol('WM_DELETE_WINDOW', self.quit_all)
+
+        self.midi_bridge = None
+        self._midi_bridge_started = False
+        try:
+            self.midi_bridge = midiin.MidiBridge(self)
+        except Exception as exc:
+            print(f"[dtpanel] MIDI bridge note: {exc}", flush=True)
 
         # Ask for the front. A window manager opens a new window BEHIND the
         # focused one, so launched from a maximised editor this window is
@@ -623,6 +633,10 @@ class DigitaktPanel(tk.Tk):
 
     # ----------------------------------------------------------------- input
     def press(self, code, event=None):
+        if isinstance(code, str):
+            code = self.codes.get(code)
+            if code is None:
+                return
         if event is not None and event.state & 0x0001:      # shift: latch
             if code in self.latched:
                 self.latched.discard(code)
@@ -638,6 +652,10 @@ class DigitaktPanel(tk.Tk):
         self._paint(code)
 
     def release(self, code):
+        if isinstance(code, str):
+            code = self.codes.get(code)
+            if code is None:
+                return
         if code in self.latched:        # a latched key ignores mouse-up
             return
         self.held.discard(code)
@@ -650,6 +668,48 @@ class DigitaktPanel(tk.Tk):
             self.held.discard(code)
             self.emu.inbox.append(('release', code, 0))
             self._paint(code)
+
+    def _keyboard_press(self, event):
+        keysym = event.keysym
+        if self.PRODUCT == 'Digitakt' and keysym in '12345678':
+            if keysym not in self._keyboard_held:
+                self._keyboard_held.add(keysym)
+                self.press('TRK')
+                self.press(keysym)
+                self.release(keysym)
+                self.release('TRK')
+            return 'break'
+        if keysym == 'space':
+            if keysym not in self._keyboard_held:
+                self._keyboard_held.add(keysym)
+                self._toggle_transport()
+            return 'break'
+        label = {'Up': 'UP', 'Down': 'DOWN',
+                 'Left': 'LEFT', 'Right': 'RIGHT'}.get(keysym)
+        if label is not None:
+            if keysym not in self._keyboard_held:
+                self._keyboard_held.add(keysym)
+                self.press(label)
+            return 'break'
+        return None
+
+    def _keyboard_release(self, event):
+        keysym = event.keysym
+        if keysym not in self._keyboard_held:
+            return None
+        self._keyboard_held.discard(keysym)
+        label = {'Up': 'UP', 'Down': 'DOWN',
+                 'Left': 'LEFT', 'Right': 'RIGHT'}.get(keysym)
+        if label is not None:
+            self.release(label)
+        return 'break'
+
+    def _toggle_transport(self):
+        play_code = self.codes.get('PLAY')
+        playing = self._led_rgb(self.led_of.get(play_code)) is not None
+        label = 'STOP' if playing else 'PLAY'
+        self.press(label)
+        self.after(120, lambda: self.release(label))
 
     def _drag_start(self, code, event):
         self._drag_y = event.y
@@ -666,6 +726,10 @@ class DigitaktPanel(tk.Tk):
             self.turn(code, step)
 
     def turn(self, code, step, event=None):
+        if isinstance(code, str):
+            code = self.enc_codes.get(code)
+            if code is None:
+                return
         if event is not None and event.state & 0x0001:
             step *= 10
         self.emu.inbox.append(('encoder', code, step))
@@ -864,6 +928,13 @@ class DigitaktPanel(tk.Tk):
         player = getattr(self, 'player', None)
         if player is not None:
             player.stop()
+        midi = getattr(self, 'midi_bridge', None)
+        if midi is not None:
+            try:
+                midi.stop()
+            except Exception as exc:
+                print(f"[dtpanel] MIDI bridge stop note: {exc}", flush=True)
+            self.midi_bridge = None
         emu = getattr(self, 'emu', None)
         self._stop_emulator(
             'saving the session -- this window closes when it is written'
@@ -1004,6 +1075,17 @@ class DigitaktPanel(tk.Tk):
         labels = getattr(getattr(emu, 'device', None), 'labels', None)
         return bool(labels) and emu.ready.is_set()
 
+    def _start_midi_bridge(self):
+        if self._midi_bridge_started:
+            return
+        self._midi_bridge_started = True
+        if self.midi_bridge is None:
+            return
+        try:
+            self.midi_bridge.start()
+        except Exception as exc:
+            print(f"[dtpanel] MIDI bridge note: {exc}", flush=True)
+
     def _tick(self):
         emu = self.emu
         if not self._named and self._names_ready():
@@ -1030,12 +1112,14 @@ class DigitaktPanel(tk.Tk):
             # the life of the window.
             self._named = True
             self._build_controls()
+            self._start_midi_bridge()
         if self._named:
             self._draw_leds()
         self._draw_audio_status()
-        fb = getattr(emu, 'fb', None)
-        if fb:
-            self.draw_screen(fb)
+        frame = (emu.frame_snapshot() if hasattr(emu, 'frame_snapshot')
+                 else getattr(emu, 'fb', None))
+        if frame is not None:
+            self.draw_screen(frame)
         failure = self._failure()
         if failure:
             self._show_failure(failure)

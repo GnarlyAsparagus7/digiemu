@@ -1438,12 +1438,29 @@ def describe_exit(rc):
     return 'exited with code %d' % rc
 
 
+MAX_LOG_BYTES = 512 * 1024
+KEEP_LOG_LINES = 1000
+
+
+def _trim_log_if_large(path, max_bytes=MAX_LOG_BYTES, keep_lines=KEEP_LOG_LINES):
+    try:
+        if os.path.isfile(path) and os.path.getsize(path) > max_bytes:
+            with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+                lines = fh.readlines()
+            if len(lines) > keep_lines:
+                with open(path, 'w', encoding='utf-8', errors='replace', newline='\n') as fh:
+                    fh.writelines(lines[-keep_lines:])
+    except Exception:
+        pass
+
+
 @contextlib.contextmanager
 def _session_output(path):
     """Send this process's prints and tracebacks (and, where they mean
     something, native crash dumps) to a utf-8 log for the duration, and put
     everything back afterwards."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    _trim_log_if_large(path)
     log = open(path, 'a', encoding='utf-8', errors='replace', newline='\n',
                buffering=1)
     saved = sys.stdout, sys.stderr

@@ -123,7 +123,7 @@ def _restore_component(component, state, name):
 
 
 def _is_int(value, low=0, high=0xFFFFFFFF):
-    return type(value) is int and low <= value <= high
+    return type(value) is int and low <= value and (high is None or value <= high)
 
 
 def _validate_timer_source(state):
@@ -147,11 +147,11 @@ def _validate_timer_source(state):
         for value in state["next"]
     ):
         raise RuntimeError("invalid timer checkpoint deadlines")
-    if not _is_int(state.get("now")) or type(state.get("held")) is not bool:
+    if not _is_int(state.get("now"), low=0, high=None) or type(state.get("held")) is not bool:
         raise RuntimeError("invalid timer checkpoint clock")
     for key in ("fired", "missed"):
         if not isinstance(state.get(key), dict) or any(
-            not _is_int(k, 0, 3) or not _is_int(v) for k, v in state[key].items()
+            not _is_int(k, 0, 3) or not _is_int(v, low=0, high=None) for k, v in state[key].items()
         ):
             raise RuntimeError("invalid timer checkpoint counters")
     if state["type"] == "Dtims":
@@ -185,7 +185,7 @@ def _validate_component_state(state, name, component=None):
             _validate_timer_source(source)
     elif typ == "TxChannel":
         if state.get("version") != 1 or not all(
-            _is_int(state.get(key))
+            _is_int(state.get(key), low=0, high=None if key in ("bytes", "transfers") else 0xFFFFFFFF)
             for key in ("chan", "vector", "pending", "bytes", "transfers")
         ):
             raise RuntimeError("invalid TxChannel checkpoint state")
@@ -275,8 +275,8 @@ def _validate_blob(blob):
         ):
             raise RuntimeError("invalid checkpoint " + key)
     if (
-        not _is_int(blob["ff1_count"])
-        or not _is_int(blob["movec_count"])
+        not _is_int(blob["ff1_count"], low=0, high=None)
+        or not _is_int(blob["movec_count"], low=0, high=None)
         or not isinstance(blob["extra"], dict)
     ):
         raise RuntimeError("invalid checkpoint counters")

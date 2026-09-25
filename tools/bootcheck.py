@@ -247,7 +247,8 @@ def main():
         print("  %s  %8d instrs  %5.2f%%" % (b["block"], b["instrs"], b["pct"]))
     print("\n--- guest output tail ---")
     print(arms[0]["uart_tail"] or "(none)")
-    return 0 if verdict == "MAIN_OS_RUNNING" else 1
+    verified = report["deterministic"] is not False
+    return 0 if verdict == "MAIN_OS_RUNNING" and verified else 1
 
 
 if __name__ == "__main__":

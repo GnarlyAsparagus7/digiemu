@@ -16,8 +16,14 @@ cd "$(dirname "$0")/.." || { echo "cannot find the repo from $0"; exit 1; }
 PY=.venv/bin/python
 TOOL=tools/ekfsadd.py
 
+format=0
+if [ "${1-}" = "--format" ]; then
+    format=1
+    shift
+fi
+
 if [ $# -lt 2 ]; then
-    echo "usage: plusdrop.sh <card image> <file>..."
+    echo "usage: plusdrop.sh [--format] <card image> <file>..."
     exit 2
 fi
 
@@ -31,11 +37,16 @@ if [ ! -f "$IMG" ]; then
     exit 1
 fi
 
-if ! $PY -P "$TOOL" "$IMG" --check >/dev/null 2>&1; then
+if ! "$PY" -P "$TOOL" "$IMG" --check >/dev/null 2>&1; then
     echo
+    if [ "$format" -eq 0 ]; then
+        echo "This card has no valid sample filesystem."
+        echo "Pass --format to create one; nothing was changed."
+        exit 1
+    fi
     echo "This card has no sample filesystem yet, so it is being formatted."
     echo "Only the sample region is touched, and it is empty."
-    $PY -P "$TOOL" "$IMG" --format --check || exit 1
+    "$PY" -P "$TOOL" "$IMG" --format --check || exit 1
     echo
 fi
 
@@ -53,6 +64,6 @@ if [ ${#files[@]} -eq 0 ]; then
     exit 1
 fi
 
-$PY -P "$TOOL" "$IMG" "${files[@]}" || exit 1
+"$PY" -P "$TOOL" "$IMG" "${files[@]}" || exit 1
 echo
 echo "Done. Restart the emulator so the firmware re-reads the drive."

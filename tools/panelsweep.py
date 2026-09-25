@@ -101,12 +101,12 @@ are *discovered at runtime* instead of typed in:
      worth printing a warning about, not silently dropping.
 
 INTRO HANDOVER: the supplied snapshots have the intro animation still
-running. This tool spins with **no instruction cap** until the firmware's
-own `intro_done` hook fires -- a capped settle has previously produced
-several agents confidently reporting on a panel map that was still showing
-the intro. The only thing that stops the wait early is the emulator itself
-reporting a non-'limit' stop (a real crash), which is treated as a hard
-failure (exit 2), never as "close enough, and moving on."
+running. This tool waits up to `--intro-limit` instructions for the firmware's
+own `intro_done` hook to fire. The default 400M limit is comfortably above the
+measured 64-70M Digitone and 140M Digitakt handovers, while ensuring a stuck
+intro cannot wait forever. Either the cap expiring or the emulator reporting a
+non-'limit' stop is a hard failure (exit 2), never "close enough, and moving
+on."
 
 Usage:
     uv run python tools/panelsweep.py \\
@@ -195,19 +195,23 @@ def install_qs_hook(m, at, state):
 
 # --- run control -----------------------------------------------------------
 
-def wait_for_handover(m, pc, pits, mark, profile):
-    """Spin UNCAPPED until `intro_done` fires. -> (pc, ok, stop_reason).
+def wait_for_handover(m, pc, pits, mark, cap):
+    """Spin until `intro_done` fires or `cap` instructions elapse.
 
-    `ok` is False only when the emulator itself stopped for a reason other
-    than running out of the (nonexistent) budget -- a real crash. There is
-    deliberately no instruction ceiling here; see the module docstring.
+    -> (pc, ok, stop_reason). `ok` is False for an emulator stop or when the
+    cap expires.
     """
     CHUNK = 10_000_000
-    while mark['intro_done'] == 0:
-        pc, executed, stop = spin(m, pc, CHUNK, pits=pits)
+    total = 0
+    while mark['intro_done'] == 0 and total < cap:
+        pc, executed, stop = spin(
+            m, pc, min(CHUNK, cap - total), pits=pits)
+        total += executed
         if stop != 'limit':
             return pc, False, stop
-    return pc, True, 'limit'
+    if mark['intro_done']:
+        return pc, True, 'limit'
+    return pc, False, 'cap'
 
 
 def probe_wait(m, pc, pits, state, cap, wanted_ret=None, min_chunk=300_000,
@@ -700,6 +704,9 @@ def main(argv=None):
     ap.add_argument('--encoders', default='0-%d' % (panelin.ENCODERS - 1),
                      help='encoder channel range, inclusive, LO-HI '
                           '(default 0-%d)' % (panelin.ENCODERS - 1))
+    ap.add_argument('--intro-limit', type=int, default=400_000_000,
+                     help='instruction cap for the intro handover '
+                          '(default 400M)')
     ap.add_argument('--settle', type=int, default=40_000_000,
                      help='post-handover settle window, instructions, used '
                           'to build the queue_send ignore-set (default 40M)')
@@ -783,15 +790,21 @@ def main(argv=None):
                   'intro_done symbol did not resolve -- cannot detect '
                   'handover.', file=sys.stderr)
             return 2
-        print('== intro is LIVE at restore; spinning UNCAPPED until '
-              'intro_done fires (no instruction ceiling) ==', flush=True)
+        print('== intro is LIVE at restore; waiting up to %d instrs for '
+              'intro_done ==' % args.intro_limit, flush=True)
         t0 = time.time()
-        pc, ok, stop = wait_for_handover(m, pc, pits, mark, profile)
+        pc, ok, stop = wait_for_handover(
+            m, pc, pits, mark, args.intro_limit)
         if not ok:
-            print('FATAL: the intro never handed over -- emulator stopped '
-                  '(stop=%r) before intro_done fired. This is not a timeout; '
-                  'it is a real halt. Refusing to report a panel map that '
-                  'may still be showing the intro.' % stop, file=sys.stderr)
+            if stop == 'cap':
+                print('FATAL: intro_done did not fire within the %d-instruction '
+                      'cap. Refusing to report a panel map that may still be '
+                      'showing the intro.' % args.intro_limit, file=sys.stderr)
+            else:
+                print('FATAL: the intro never handed over -- emulator stopped '
+                      '(stop=%r) before intro_done fired. This is not a timeout; '
+                      'it is a real halt. Refusing to report a panel map that '
+                      'may still be showing the intro.' % stop, file=sys.stderr)
             return 2
         print('intro handed over (%.1fs)' % (time.time() - t0), flush=True)
     else:
