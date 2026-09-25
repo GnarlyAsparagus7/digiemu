@@ -576,29 +576,34 @@ class Emulator(threading.Thread):
             return incompatible_message(self.snapshot, exc)
         return describe_error(exc)
 
+    def _intro_pixel(self, x, y, val, bmp):
+        if self.use_panel:
+            return
+        self.stats['bmp'] = bmp
+        if (x, y) in self._seen and len(self._seen) > W * H // 2:
+            now = time.time()
+            self.captured.append(self.frame_snapshot())
+            self.stats['frames'] += 1              # coordinate repeat = new frame
+            self.stats['fps'] = 1.0 / max(1e-6, now - self._frame_t)
+            self._frame_t = now
+            self._seen.clear()
+            # Deliberately no emu_stop here any more. Under spin() a hook
+            # that stops the run early makes the instruction accounting a
+            # lie -- emu_start returns having executed fewer than it was
+            # asked for, the loop credits itself the full step, and every
+            # timer deadline drifts away from the instructions actually
+            # executed. The worker regains control every BUDGET
+            # instructions instead, which is soon enough for pause and
+            # stop to feel immediate.
+        self._seen.add((x, y))
+        with self._fb_lock:
+            self.fb[y * W + x] = val
+            self.version += 1
+        self.stats['px'] += 1
+
     def _run(self):
         def on_pixel(x, y, val, bmp):
-            self.stats['bmp'] = bmp
-            if (x, y) in self._seen and len(self._seen) > W * H // 2:
-                now = time.time()
-                self.captured.append(self.frame_snapshot())
-                self.stats['frames'] += 1              # coordinate repeat = new frame
-                self.stats['fps'] = 1.0 / max(1e-6, now - self._frame_t)
-                self._frame_t = now
-                self._seen.clear()
-                # Deliberately no emu_stop here any more. Under spin() a hook
-                # that stops the run early makes the instruction accounting a
-                # lie -- emu_start returns having executed fewer than it was
-                # asked for, the loop credits itself the full step, and every
-                # timer deadline drifts away from the instructions actually
-                # executed. The worker regains control every BUDGET
-                # instructions instead, which is soon enough for pause and
-                # stop to feel immediate.
-            self._seen.add((x, y))
-            with self._fb_lock:
-                self.fb[y * W + x] = val
-                self.version += 1
-            self.stats['px'] += 1
+            self._intro_pixel(x, y, val, bmp)
 
         try:
             # NOTE: unblock=True also satisfies the frame semaphore, so the
@@ -958,8 +963,8 @@ class Emulator(threading.Thread):
             at(profile.panel_diff, latch_frame)
         else:
             print('[gui] WARNING: panel_diff/fb_front did not resolve for this '
-                  'image; falling back to reading the framebuffer at an '
-                  'arbitrary moment, which may tear', flush=True)
+                  'image; complete panel frames will not be published',
+                  flush=True)
         self._pits = pits
         if self._audio_sources:
             # The SSI clock starts at the timers' own instruction count, so
@@ -1346,8 +1351,9 @@ class Emulator(threading.Thread):
         emu/panel.py guarantees [FRONT] is complete and untorn. Polling the
         pointer here instead would sample at an arbitrary point in the flush
         and, after a swap, read the buffer being rendered into next -- the
-        window flickered for exactly that reason. The fallback read is only
-        for an image where panel_diff did not resolve, so no latch exists.
+        window flickered for exactly that reason. If no complete latch exists,
+        leave the last published frame unchanged rather than publishing a
+        possibly torn fallback read.
 
         A frame is counted when the bytes change, which is the firmware's own
         notion of a new frame -- unlike the setPixel path, which has to infer
@@ -1357,8 +1363,8 @@ class Emulator(threading.Thread):
             return
         buf = self._panel_latch
         if buf is None:
-            buf = panel.read(m, self.fb_front)
-        if buf is None or buf == self._last_panel:
+            return
+        if buf == self._last_panel:
             return
         px = panel.lit(buf)
         if not px and not self._panel_live:

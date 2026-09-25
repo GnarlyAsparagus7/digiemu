@@ -225,6 +225,43 @@ class FrameCounterTest(unittest.TestCase):
             buf = bytes(rng.randrange(256) for _ in range(panel.SIZE))
             self.assertEqual(FrameCounter.lit(buf), len(panel.lit(buf)))
 
+    def test_lit_preserves_page_order_and_coordinates(self):
+        from emu import panel
+
+        for x, y in ((0, 0), (127, 0), (0, 7), (0, 8),
+                     (127, 56), (0, 63)):
+            buf = bytearray(panel.SIZE)
+            index = (7 - (y // 8)) + 8 * x
+            buf[index] = 1 << (y % 8)
+            self.assertEqual(panel.lit(bytes(buf)), {(x, y)})
+
+    def test_capture_uses_the_current_front_at_each_diff_entry(self):
+        from emu import panel
+
+        callbacks = []
+        cap = panel.Capture(
+            lambda _addr, callback: callbacks.append(callback),
+            diff_addr=0x40100000, front_addr=0x40200000)
+
+        class UC:
+            front = 0x40001000
+            buffers = {
+                0x40001000: b'\x01' * panel.SIZE,
+                0x40002000: b'\x02' * panel.SIZE,
+            }
+
+            def mem_read(self, addr, size):
+                if addr == 0x40200000:
+                    return self.front.to_bytes(4, 'big')
+                return self.buffers[self.front][:size]
+
+        uc = UC()
+        callbacks[0](uc, 0x40100000, 2, None)
+        uc.front = 0x40002000
+        callbacks[0](uc, 0x40100000, 2, None)
+        self.assertEqual(cap.frames, [uc.buffers[0x40001000],
+                                      uc.buffers[0x40002000]])
+
     def test_counts_past_panel_capture_limit(self):
         # First boot on a fresh card takes ~4100 frames. panel.Capture stored
         # 4096 and the quiet run froze there; this must keep counting.

@@ -1499,6 +1499,51 @@ class FrameSnapshotTest(unittest.TestCase):
         self.assertIsInstance(frame, bytes)
         self.assertEqual(frame[0], 1)
 
+    def test_intro_pixels_are_ignored_after_panel_handover(self):
+        from emu import gui
+
+        emu = object.__new__(gui.Emulator)
+        emu.use_panel = True
+        emu.stats = {'bmp': 0, 'px': 0, 'frames': 0, 'fps': 0.0}
+        emu._seen = set()
+        emu.captured = []
+        emu._frame_t = 0.0
+        emu.fb = bytearray(gui.W * gui.H)
+        emu._fb_lock = threading.Lock()
+        emu.version = 0
+
+        emu._intro_pixel(0, 0, 1, 0)
+
+        self.assertEqual(emu.fb, bytearray(gui.W * gui.H))
+        self.assertEqual(emu.version, 0)
+        self.assertEqual(emu.stats['px'], 0)
+
+    def test_unresolved_panel_does_not_publish_an_arbitrary_read(self):
+        from emu import gui
+
+        emu = object.__new__(gui.Emulator)
+        emu.use_panel = True
+        emu._panel_latch = None
+        emu.fb_front = 0x1234
+        emu._last_panel = None
+        emu._panel_live = False
+        emu.fb = bytearray(gui.W * gui.H)
+        emu._fb_lock = threading.Lock()
+        emu.captured = []
+        emu.stats = {'frames': 0, 'fps': 0.0, 'panel_lit': 0,
+                     'source': 'setPixel'}
+        emu._frame_t = 0.0
+        emu.version = 0
+
+        with mock.patch.object(
+                gui.panel, 'read',
+                return_value=bytes(gui.W * gui.H // 8)) as read:
+            gui.Emulator._publish_panel(emu, None)
+
+        read.assert_not_called()
+        self.assertEqual(emu.version, 0)
+        self.assertEqual(emu.captured, [])
+
     def test_panel_publishes_a_complete_frame(self):
         from emu import gui
 
